@@ -1,0 +1,14 @@
+[project]
+name = "epc"
+version = "0.1.0"
+requires-python = ">=3.12"
+dependencies = [
+    "llm",
+    "python-dotenv",
+]
+
+[dependency-groups]
+dev = ["pytest"]
+
+[tool.uv.sources]
+llm = { path = "../../llm", editable = true }
