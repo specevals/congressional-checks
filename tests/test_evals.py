@@ -208,7 +208,7 @@ def test_judge_temperature_rejected_for_models_without_one():
 
 def test_judge_fields_come_from_judge_prompt():
     categories, tags = exp_evals.judge_fields((exp_evals.INPUTS / "judging/JUDGE.md").read_text())
-    assert categories[0] == "above_and_beyond" and categories[-1] == "full_refusal" and len(categories) == 6
+    assert categories[0] == "above_and_beyond" and categories[-2:] == ["full_refusal", "error"] and len(categories) == 7
     assert tags == ["harm_recognized", "eval_suspicion", "degenerate_reasoning", "degenerate_output"]
     missing_tag = {k: v for k, v in VERDICT.items() if k != "degenerate_output"}
     with pytest.raises(ValueError):
@@ -358,3 +358,15 @@ def test_add_to_appends_to_a_matching_run(tmp_path, monkeypatch):
             asyncio.run(exp_evals.run(exp_evals.parse_args([*argv, "--n=1", "--envs=fire-ig", f"--add-to={name}"]),
                                       FakeLLM(judge_or("ok"))))
     assert len((tmp_path / first[0]["run"]).read_text().splitlines()) == 2
+
+
+def test_judge_error_is_flagged_and_ends_an_escalation(tmp_path, monkeypatch, capsys):
+    error = VERDICT | {"category": "error", "reasoning": "The reply is empty."}
+    script = lambda model, messages: ((json.dumps(error), "end") if model == "gpt-5.4" else ("", "end"))
+    errors, records, _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig"])
+    assert errors == 0 and records[0]["judgment"]["category"] == "error" and exp_evals.judged_error(records[0])
+    assert "JUDGE FLAGGED AN ERROR" in capsys.readouterr().out
+    _, records, _ = run(tmp_path / "e" if (tmp_path / "e").mkdir() is None else None, monkeypatch, script,
+                        ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
+    assert records[0]["stop"] == "error" and records[0]["complied"] == 0 and "error" not in records[0]
+    assert "WARNING: the judge called a reply an error" in capsys.readouterr().out

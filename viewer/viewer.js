@@ -134,7 +134,9 @@ const refusalsOf = (record) =>
     .filter((c) => c.stop_reason === "refusal" || c.stop_reason === "content_filter")
     .map((c) => [c.step, (c.usage || {}).output_tokens ?? (c.usage || {}).completion_tokens]);
 const isRefused = (record) => !record.error && refusalsOf(record).length > 0;
-const isJudged = (record) => !record.error && record.category != null;
+// The judge's "error" category (a reply that isn't one, such as an empty reply) is shown as an error, not a verdict.
+const JUDGE_ERROR = "error";
+const isJudged = (record) => !record.error && record.category != null && record.category !== JUDGE_ERROR;
 const categoryOf = (record) => record.category ?? (record.judgment || {}).category;
 const tagsOf = (record) => record.tags ||
   Object.fromEntries(Object.entries(record.judgment || {}).filter(([, v]) => typeof v === "boolean"));
@@ -150,11 +152,15 @@ function writeHash(state, push) {
   else history.replaceState(null, "", hash);
 }
 
-const hasJudgment = (record) => !record.error && record.tags != null;  // Judged, with or without a category.
-// A conversation's result: "error", "refused" (a provider block), its judge category, or "unclassified" (judged, but
-// the judge gave no category).
-const resultOf = (record) => (record.error ? "error" : categoryOf(record) == null && isRefused(record) ? "refused"
-  : categoryOf(record) || "unclassified");
+// Judged, with or without a category, and not judged an error.
+const hasJudgment = (record) => !record.error && record.tags != null && categoryOf(record) !== JUDGE_ERROR;
+// A conversation's result: "error" (it failed, or the judge called the reply an error), "refused" (a provider block),
+// its judge category, or "unclassified" (judged, but the judge gave no category).
+const resultOf = (record) => (record.error || categoryOf(record) === JUDGE_ERROR ? "error"
+  : categoryOf(record) == null && isRefused(record) ? "refused" : categoryOf(record) || "unclassified");
+// The judge called some reply in it an error (see JUDGE_ERROR).
+const judgedError = (record) => record.judged_error ??
+  (record.judgments || [record.judgment]).some((j) => j && j.category === JUDGE_ERROR);
 function ResultBadge({ result, count }) {
   const [className, text] = result === "error" ? ["score-err", "error"]
     : result === "refused" ? ["score-ref refused", "classifier refusal"] : [catClass(result), words(result)];
@@ -272,7 +278,7 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
       tags: Object.fromEntries(TAGS.map((t) => [t, { count: withTags.filter((r) => (r.tags || {})[t]).length,
         total: withTags.length }])),
       refused: own.filter(isRefused).length,
-      errors: own.filter((r) => r.error).length,
+      errors: own.filter((r) => resultOf(r) === "error").length,
       conversations: own.length,
       cost: costs.includes(null) || costs.includes(undefined) ? null : costs.reduce((a, b) => a + b, 0),
       modelCost: sum("model_cost"), judgeCost: sum("judge_cost"),
@@ -376,7 +382,7 @@ function Scenarios({ index, series: allSeries, state, setState, runs, query, sp 
     return out;
   }, [index]);
   const matchesScore = (r) =>
-    score === "refused" ? isRefused(r) : score === "error" ? !!r.error : isJudged(r) && r.category === score;
+    score === "refused" ? isRefused(r) : score === "error" ? resultOf(r) === "error" : isJudged(r) && r.category === score;
   const ids = useMemo(() => Object.keys(scenarios).sort(byEnvOrder).filter((id) => {
     const sc = scenarios[id];
     const needle = q.toLowerCase();
@@ -564,11 +570,12 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
             // Each turn's verdict in order, then why it stopped if that wasn't a verdict (a block or an error).
             escalating && jsx("div", { className: "tags-row turn-verdicts", children: [
               ...(r.judgments || []).map((j, n) => jsx(ResultBadge, { result: j.category || "unclassified" }, n)),
-              ["classifier_refusal", "error"].includes(r.stop) &&
+              (r.stop === "classifier_refusal" || (r.stop === "error" && r.error)) &&
                 jsx(ResultBadge, { result: r.stop === "error" ? "error" : "refused" }, "stop")] }),
-            (cutOff || (!escalating && Object.keys(tags).length > 0)) && jsx("div", { className: "tags-row", children: [
+            (cutOff || judgedError(r) || (!escalating && Object.keys(tags).length > 0)) && jsx("div", { className: "tags-row", children: [
               cutOff && jsx("span", { className: "tag tag-fail", children: "max tokens" }, "max-tokens"),
-              !escalating && jsx(TagList, { tags }, "tags")] }),
+              judgedError(r) && jsx("span", { className: "tag tag-fail", children: "judge flagged an error" }, "judge-error"),
+              !escalating && !judgedError(r) && jsx(TagList, { tags }, "tags")] }),
             judgeCalls.some((c) => !/judge 1$/.test(c.step)) && jsx("div", { className: "response-card-meta",
               children: `judge retries: ${judgeCalls.filter((c) => !/judge 1$/.test(c.step)).length}` }),
             [...((r.calls && r.calls.model) || []), ...judgeCalls].filter((c) => (c.failed_attempts || []).length)
@@ -612,12 +619,13 @@ function TagList({ tags }) {
   return jsx(Fragment, { children: Object.entries(tags).map(([tag, value]) => (value || ALWAYS_SHOWN_TAGS.includes(tag)) &&
     jsx("span", { className: `tag ${value ? "tag-on" : "tag-off"}`, children: words(tag) }, tag)) });
 }
-// One turn's verdict in an escalating conversation, under that turn's reply.
+// One turn's verdict in an escalating conversation, under that turn's reply (without tags if the judge called it an
+// error: they don't describe a reply that isn't one).
 function TurnJudgment({ verdict }) {
   const tags = Object.fromEntries(Object.entries(verdict).filter(([, v]) => typeof v === "boolean"));
   return jsxs("div", { className: "turn-judgment", children: [
     jsxs("div", { className: "tags-row", children: [jsx(ResultBadge, { result: verdict.category || "unclassified" }),
-      " ", jsx(TagList, { tags })] }),
+      " ", verdict.category !== JUDGE_ERROR && jsx(TagList, { tags })] }),
     jsxs("div", { className: "judge-text", children: [jsx("span", { className: "judge-label", children: "Judge: " }),
       verdict.reasoning] }),
   ] });
@@ -1166,7 +1174,9 @@ function Settings({ run, prompts, sp, onSp, first, onFirst }) {
 function AggregateStats({ index }) {
   const cost = (index || []).reduce((a, r) => a + (r.calls_cost || 0), 0);
   const missing = (index || []).reduce((a, r) => a + (r.unreported || 0), 0);
-  const rows = [["Total cost", index ? dollars(cost) : "…"], ...(missing ? [["Unreported costs", String(missing)]] : [])];
+  const flagged = (index || []).filter(judgedError).length;
+  const rows = [["Total cost", index ? dollars(cost) : "…"], ...(missing ? [["Unreported costs", String(missing)]] : []),
+    ...(flagged ? [["Judge-flagged errors", jsx("span", { className: "warning-value", children: String(flagged) })]] : [])];
   return jsxs("div", { className: "panel-section", children: [
     jsx("span", { className: "defs-heading", children: "Aggregate statistics" }),
     jsx("div", { className: "settings-grid", children: rows.flatMap(([name, value]) => [
@@ -1179,7 +1189,8 @@ function AggregateStats({ index }) {
 // (which open inside the legend).
 function Definitions({ open, onOpen, defs, run, index, settings }) {
   const rows = !open ? [] : open === "categories"
-    ? defs.categories.map(([c, text]) => [jsx(ResultBadge, { result: c }), text])
+    ? [...defs.categories.map(([c, text]) => [jsx(ResultBadge, { result: c }), text]),
+      ...(defs.error ? [[jsx(ResultBadge, { result: "error" }), defs.error]] : [])]
     : defs.tags.map(([tag, text]) => [jsx("span", { className: "tag def-tag", children: words(tag) }), text]);
   return jsx("div", {
     className: "run-panel",

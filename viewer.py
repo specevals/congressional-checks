@@ -142,13 +142,19 @@ def run_info(run, label=None):
             "definitions": definitions(next((r["judge_prompt_text"] for r in rows if r.get("judge_prompt_text")), ""))}
 
 
+JUDGE_ERROR = "error"  # The judge's fallback category for a reply that isn't one (as in exp_evals.py).
+
+
 def definitions(text):
     """Categories (in the judge prompt's order) and tags, read from the judge prompt a run saved. A category is a
-    bullet named in the reply format's "category" list; every other bullet is a tag."""
+    bullet named in the reply format's "category" list; every other bullet is a tag. The judge's "error" category is
+    kept apart (`error`, its definition, or None): it's shown as an error, not on the category scale."""
     bullets = re.findall(r"^- `(\w+)`: (.+)$", text, re.M)
     listed = re.search(r'"category": "<([^>]+)>"', text)
     names = [c.strip() for c in listed.group(1).split("|")] if listed else []
-    return {"categories": [[k, v] for k, v in bullets if k in names], "tags": [[k, v] for k, v in bullets if k not in names]}
+    return {"categories": [[k, v] for k, v in bullets if k in names and k != JUDGE_ERROR],
+            "error": next((v for k, v in bullets if k == JUDGE_ERROR and k in names), None),
+            "tags": [[k, v] for k, v in bullets if k not in names]}
 
 
 def any_turn_tags(judgments):
@@ -167,6 +173,8 @@ def outcome(record):
                 "steps": [s["title"] for s in record["escalations"]],
                 "tags_any": any_turn_tags(record.get("judgments") or [])}
     row["tags"] = {k: v for k, v in judgment.items() if isinstance(v, bool)} or None
+    row["judged_error"] = any((j or {}).get("category") == JUDGE_ERROR
+                              for j in record.get("judgments") or [record.get("judgment")])
     row["error"] = record.get("error")
     calls = record.get("calls", {}).get("model", [])
     row["refusals"] = [(c.get("step"), (c.get("usage") or {}).get("output_tokens",

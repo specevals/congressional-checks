@@ -118,6 +118,9 @@ async def run(args, llm=None):
         print(f"Done: {spent(llm, finished)} spent. Saved to {out}")
         for record in errors:
             print(f"ERROR: {record['model']} {exp_evals.scenario_id(record)} #{record['sample']}: {record['error']}")
+        for record in filter(exp_evals.judged_error, finished):
+            print(f"WARNING: the judge called a reply an error: {record['model']} {exp_evals.scenario_id(record)} "
+                  f"#{record['sample']}: {record['judgment']['reasoning']}")
     return len(errors)
 
 

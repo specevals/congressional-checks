@@ -18,6 +18,8 @@
   --text-secondary: #536471;
   --text-tertiary: #8899a6;
   --text-quaternary: #b8c4cc;
+  --selector: #6f8fc4;
+  --selector-active: #2457a6;
   --bg-primary: #ffffff;
   --bg-secondary: #f7f9f9;
   --bg-hover: #f7f9f9;
@@ -461,6 +463,10 @@ body {
 .pick-grid {
   margin-bottom: 16px;
 }
+.warning-value {
+  color: var(--accent-fail);
+  font-weight: 600;
+}
 .turn-verdicts {
   display: flex;
   flex-wrap: wrap;
@@ -813,12 +819,12 @@ body {
   font-family: var(--font-sans);
   font-size: 12px;
   font-weight: 500;
-  color: var(--text-tertiary);
+  color: var(--selector);
   transition: color 0.15s;
 }
 .defs-toggle:hover,
 .defs-toggle.active {
-  color: var(--text-primary);
+  color: var(--selector-active);
 }
 .defs-list {
   display: grid;
