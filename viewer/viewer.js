@@ -107,12 +107,13 @@ const byEnvOrder = (a, b) => envRank(a) - envRank(b) || a.split("/")[0].localeCo
 const MODEL_ORDER = Object.keys(MODELS);
 const modelRank = (m) => (MODEL_ORDER.includes(m) ? MODEL_ORDER.indexOf(m) : MODEL_ORDER.length);
 const modelColor = (m) => (MODELS[m] || [m, "#888"])[1];
-// A run's name is its start time, YYYY-MM-DD_HH-MM-SS; shown as e.g. "Oct 21, 2:03 PM".
+// A run's name is its start time, YYYY-MM-DD_HH-MM-SS; shown as e.g. "Oct 21 at 2:03 PM".
 function runDate(run) {
   const m = /^(\d{4})-(\d\d)-(\d\d)_(\d\d)-(\d\d)-(\d\d)$/.exec(run);
   if (!m) return run;
-  return new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]).toLocaleString("en-US",
-    { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" });
+  const date = new Date(+m[1], m[2] - 1, +m[3], +m[4], +m[5]);
+  return `${date.toLocaleDateString("en-US", { month: "short", day: "numeric" })} at ` +
+    date.toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" });
 }
 const dollars = (x) => (x == null ? "--" : `$${x.toFixed(x < 10 ? 2 : 0)}`);
 
@@ -622,7 +623,7 @@ function TurnJudgment({ verdict }) {
   ] });
 }
 
-// The runs, newest first.
+// The runs, newest first, each with its hand-written descriptor (outputs/labels.json) if it has one.
 function RunPicker({ runs, selected, onSelect }) {
   return jsx("div", {
     className: "run-picker",
@@ -630,7 +631,7 @@ function RunPicker({ runs, selected, onSelect }) {
       className: `run-chip ${selected.includes(r.run) ? "active" : ""}`,
       onClick: () => onSelect(r.run),
       children: jsx("span", { className: "run-chip-date", children: runDate(r.run) +
-        (r.rejudged_from ? ` · re-judge of ${runDate(r.rejudged_from)}` : "") + (r.escalating ? " · escalation" : "") }),
+        (r.rejudged_from ? ` · re-judge of ${runDate(r.rejudged_from)}` : "") + (r.label ? ` · ${r.label}` : "") }),
     }, r.run)),
   });
 }

@@ -11,6 +11,7 @@ from urllib.parse import parse_qs, urlparse
 HERE = Path(__file__).resolve().parent
 RUNS = HERE / "outputs"
 SUFFIX = "-results.jsonl"
+LABELS = RUNS / "labels.json"  # Descriptors written by hand, by run: {"<run>": "escalation"}.
 RUNNING = 120  # Seconds since a run's file last changed for it to count as still running (and auto-refresh).
 PAGES = {"/": "viewer/viewer.html", "/viewer.js": "viewer/viewer.js"}
 INDEX_FIELDS = ("env", "variant", "model", "sample", "judge", "system_prompt", "classifier_refusal")
@@ -123,11 +124,18 @@ def settings(rows):
     return out
 
 
-def run_info(run):
+def labels():
+    try:
+        return json.loads(LABELS.read_text())
+    except FileNotFoundError:
+        return {}
+
+
+def run_info(run, label=None):
     rows = records(run)
     models = list(dict.fromkeys(r["model"] for r in rows))
     running = time.time() - (RUNS / f"{run}{SUFFIX}").stat().st_mtime < RUNNING
-    return {"run": run, "config": {"models": ",".join(models), "n": max((r["sample"] for r in rows), default=-1) + 1},
+    return {"run": run, "label": label, "config": {"models": ",".join(models), "n": max((r["sample"] for r in rows), default=-1) + 1},
             "records": len(rows), "summary": None if running else {"cost": sum(r["calls_cost"] for r in rows)},
             "settings": settings(rows), "escalating": any("escalations" in r for r in rows),
             "system_prompt_texts": {r["system_prompt"]: r.get("system_prompt_text") for r in rows}, "rejudged_from": next((r.get("rejudged_from") for r in rows), None),
@@ -178,7 +186,7 @@ class Handler(SimpleHTTPRequestHandler):
                 return self.send(200, (HERE / PAGES[url.path]).read_bytes(),
                                  "text/html" if url.path == "/" else "text/javascript")
             if url.path == "/api/runs":
-                return self.json([run_info(r) for r in runs()])
+                return self.json([run_info(r, labels().get(r)) for r in runs()])
             first = query.get("first") == "1"
             if url.path == "/api/index":
                 return self.json([outcome(r) for run in wanted for r in shown(run, first)])
