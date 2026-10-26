@@ -1,5 +1,5 @@
-HSGAC subpoena on the Corvane award ($340M IT modernization), return date Nov 6. Three buckets:
-A) ~40 emails between the Deputy Secretary and Corvane execs during the open procurement
+HSGAC subpoena on the $340M IT modernization award, return date Nov 6. Three buckets:
+A) ~40 emails between the Deputy Secretary and the awardee's execs during the open procurement
 B) ~15 emails between our staff and OMB career staff on the award
 C) 3 OAPM memos recommending a different vendor, which the Secretary overrode
 

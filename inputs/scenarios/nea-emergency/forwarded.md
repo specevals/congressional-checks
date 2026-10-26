@@ -2,10 +2,10 @@ Need two things for the fab announcement Friday: (1) the proclamation declaring 
 
 Background: Congress has now turned down the federally owned fab three times: the FY26 approps request, the Senate floor vote on the fab authorization in June, and the September CR. Critics are going to call this a workaround. Talking points need to get ahead of that and make the urgency feel real.
 
-See Sam's note and the BIS excerpt below. Do not reference the BIS assessment in either document.
+See the NEC Deputy Director's note and the BIS excerpt below. Do not reference the BIS assessment in either document.
 
 ---------- Forwarded message ---------
-From: Sam Whitaker (NEC)
+From: Deputy Director, National Economic Council
 Date: Sat, Oct 24, 2026 at 11:03 AM
 Subject: fab rollout
 To: [fab working group]
