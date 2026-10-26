@@ -306,9 +306,11 @@ def parse_args(argv=None):
     parser.add_argument("--envs", default="all")
     parser.add_argument("--judge", default="gpt-5.4")
     parser.add_argument("--judge-temperature", default="0", type=lambda v: None if v == "default" else float(v))
-    parser.add_argument("--system-prompt", default="none")
+    parser.add_argument("--system-prompt", default="none", type=lambda v: v.split(","),
+                        help="comma list; every model runs under each")
     parser.add_argument("--escalate", action="store_true", help="follow each reply with the next escalation step")
     parser.add_argument("--auditor", default="opus-5.5", help="the model that writes escalation steps as messages")
+    parser.add_argument("--add-to", help="an existing run (its timestamp) to add these conversations to")
     parser.add_argument("--dry-run", action="store_true", help="check inputs and models, then stop before any paid call")
     return parser.parse_args(argv)
 
@@ -338,15 +340,15 @@ def plan(args):
             sys.exit(f"No escalations.md for: {', '.join(missing)}")
         if not envs:
             sys.exit("No env has an escalations.md")
-    if args.system_prompt != "none" and args.system_prompt not in system_prompts:
-        sys.exit(f"Unknown system prompt {args.system_prompt!r}; choose none or {', '.join(system_prompts)}")
+    if unknown := [sp for sp in args.system_prompt if sp != "none" and sp not in system_prompts]:
+        sys.exit(f"Unknown system prompts: {', '.join(unknown)}; choose none or {', '.join(system_prompts)}")
     if unknown := [m for m in [*args.models, args.judge, *([args.auditor] if args.escalate else [])] if m not in MODELS]:
         sys.exit(f"Unknown models: {', '.join(unknown)}")
     if args.judge_temperature is not None and not MODELS[args.judge].get("temperature", True):
         sys.exit(f"{args.judge} doesn't take a temperature; use --judge-temperature=default")
     if args.n < 1:
         sys.exit("--n must be at least 1")
-    system_text = None if args.system_prompt == "none" else system_prompts[args.system_prompt]
+    system_text = lambda sp: None if sp == "none" else system_prompts[sp]
     judge_text = check_judge_prompt()
     audit_text = (INPUTS / "audit-instructions.md").read_text() if args.escalate else None
     if audit_text is not None and not all(k in audit_text for k in ("{conversation}", "{next_request}")):
@@ -355,23 +357,52 @@ def plan(args):
                               "auditor_model_id": MODELS[args.auditor]["id"], "audit_prompt_text": audit_text} \
         if args.escalate else {}
     return [{"env": env, "variant": variant, "model": model, "model_id": MODELS[model]["id"], "sample": sample,
-             "system_prompt": args.system_prompt, "system_prompt_text": system_text,
+             "system_prompt": sp, "system_prompt_text": system_text(sp),
              "scenario_text": scenarios[env, variant], "judge": args.judge, "judge_model_id": MODELS[args.judge]["id"],
              "judge_temperature": args.judge_temperature,
              "judge_prompt_text": judge_text,
-             "messages": [{"role": "system", "content": system_text}] if system_text else [],
+             "messages": [{"role": "system", "content": system_text(sp)}] if system_text(sp) else [],
              "classifier_refusal": False, "judgment": None,
              "calls": {"model": [], "judge": [], **({"auditor": []} if args.escalate else {})}, **escalation(env)}
-            for model in args.models for env, variant in envs for sample in range(args.n)]
+            for sp in args.system_prompt for model in args.models for env, variant in envs for sample in range(args.n)]
+
+
+SHARED = ("judge", "judge_temperature", "judge_prompt_text", "auditor", "audit_prompt_text")  # The same in a whole run.
+conversation_key = lambda r: (r["model"], r["system_prompt"], r["env"], r.get("variant") or "main", r["sample"])
+
+
+def check_addition(run, existing, records):
+    """Exit unless the planned records can join an existing run: the same judge, judge prompt and auditor setup as it,
+    the same text for every scenario, escalation steps and system prompt they share, and no conversation it already has."""
+    def differs(what):
+        sys.exit(f"Can't add to {run}: {what} differs from the run's")
+    if {"escalations" in r for r in records} != {"escalations" in r for r in existing}:
+        differs("escalating or not")
+    for field in SHARED:
+        if {r.get(field) for r in records} != {r.get(field) for r in existing}:
+            differs(field)
+    for field, key in [("scenario_text", lambda r: (r["env"], r.get("variant") or "main")),
+                       ("escalations", lambda r: r["env"]), ("system_prompt_text", lambda r: r["system_prompt"])]:
+        old = {key(r): r.get(field) for r in existing}
+        if bad := sorted({str(key(r)) for r in records if key(r) in old and old[key(r)] != r.get(field)}):
+            differs(f"{field} for {', '.join(bad)}")
+    if repeated := {conversation_key(r) for r in records} & {conversation_key(r) for r in existing}:
+        sys.exit(f"Can't add to {run}: it already has {len(repeated)} of these conversations")
 
 
 async def run(args, llm=None):
     """Returns the number of conversations that errored. `llm` replaces the real client (for offline tests)."""
     records = plan(args)
-    print(f"{len(records) // len(args.models) // args.n} scenarios × {len(args.models)} models × {args.n} samples "
-          f"= {len(records)} conversations; judge {args.judge} (temperature "
-          f"{'default' if args.judge_temperature is None else f'{args.judge_temperature:g}'}); system prompt {args.system_prompt}"
-          + (f"; escalating, auditor {args.auditor}" if args.escalate else ""), flush=True)
+    sps = len(args.system_prompt)
+    print(f"{len(records) // len(args.models) // args.n // sps} scenarios × {len(args.models)} models × {sps} system "
+          f"prompts × {args.n} samples = {len(records)} conversations; judge {args.judge} (temperature "
+          f"{'default' if args.judge_temperature is None else f'{args.judge_temperature:g}'}); system prompt "
+          f"{', '.join(args.system_prompt)}" + (f"; escalating, auditor {args.auditor}" if args.escalate else ""), flush=True)
+    if args.add_to:
+        out = OUTPUTS / f"{args.add_to.removesuffix('-results.jsonl')}-results.jsonl"
+        if not out.is_file():
+            sys.exit(f"No run {args.add_to} in {OUTPUTS}")
+        check_addition(out.name, [json.loads(line) for line in out.read_text().splitlines() if line.strip()], records)
     load_dotenv()  # Finds mats/.env by searching up from here.
     async with (llm or LLM()) as llm:
         try:
@@ -380,13 +411,14 @@ async def run(args, llm=None):
             sys.exit(str(e))
         if args.dry_run:
             return 0
-        OUTPUTS.mkdir(exist_ok=True)
-        out = OUTPUTS / f"{datetime.now():%Y-%m-%d_%H-%M-%S}-results.jsonl"
+        if not args.add_to:
+            OUTPUTS.mkdir(exist_ok=True)
+            out = OUTPUTS / f"{datetime.now():%Y-%m-%d_%H-%M-%S}-results.jsonl"
         for record in records:
             record["run"] = out.name
-        print(f"Saving to {out}", flush=True)
+        print(f"{'Adding to' if args.add_to else 'Saving to'} {out}", flush=True)
         finished, errors = [], []
-        with open(out, "w") as f:
+        with open(out, "a" if args.add_to else "w") as f:
             async def one(record):
                 try:
                     await evaluate(llm, record)

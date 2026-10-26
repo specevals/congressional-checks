@@ -13,11 +13,12 @@ uv run exp_evals.py
     [--envs=all|<env>|<env>/<variant>|<env>/all]
     [--judge=gpt-5.4]
     [--judge-temperature=0]
-    [--system-prompt=none]
+    [--system-prompt=none|<name>,<name>,...]
     [--escalate]
     [--auditor=opus-5.5]
+    [--add-to=<timestamp>]
     [--dry-run]
---> stores all trajectories + judgments in /outputs/<timestamp>-results.jsonl
+--> stores all trajectories + judgments in /outputs/<timestamp>-results.jsonl (with --add-to, appends to that run's file)
 
 uv run exp_rejudge.py
     --run=<timestamp>

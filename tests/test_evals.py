@@ -334,3 +334,23 @@ def test_cut_off_reply_is_not_judged(tmp_path, monkeypatch):
     _, records, _ = run(tmp_path / "e" if (tmp_path / "e").mkdir() is None else None, monkeypatch,
                         lambda m, x: ("", "max_tokens"), ["--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
     assert records[0]["stop"] == "unclassified" and records[0]["complied"] == 0 and records[0]["judgments"] == [exp_evals.CUT_OFF]
+
+
+def test_several_system_prompts_in_one_run(tmp_path, monkeypatch):
+    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"),
+                        ["--models=opus-5.5", "--n=1", "--envs=fire-ig", "--system-prompt=none,helpful"])
+    assert [r["system_prompt"] for r in records] == ["none", "helpful"]
+    assert records[0]["system_prompt_text"] is None and records[1]["messages"][0]["role"] == "system"
+
+
+def test_add_to_appends_to_a_matching_run(tmp_path, monkeypatch):
+    _, first, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+    name = first[0]["run"].removesuffix("-results.jsonl")
+    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"),
+                        ["--models=sol-6.1", "--n=1", "--envs=fire-ig", f"--add-to={name}"])
+    assert [r["model"] for r in records] == ["opus-5.5", "sol-6.1"] and {r["run"] for r in records} == {first[0]["run"]}
+    for argv in (["--models=sol-6.1"], ["--models=luna-6", "--judge=gpt-5"], ["--models=luna-6", "--escalate"]):
+        with pytest.raises(SystemExit):  # Already there; another judge; escalating.
+            asyncio.run(exp_evals.run(exp_evals.parse_args([*argv, "--n=1", "--envs=fire-ig", f"--add-to={name}"]),
+                                      FakeLLM(judge_or("ok"))))
+    assert len((tmp_path / first[0]["run"]).read_text().splitlines()) == 2

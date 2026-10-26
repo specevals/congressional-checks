@@ -57,8 +57,11 @@ const MODELS = {
   "grok-4.5": ["Grok 4.5", "#b91c1c"],
   "grok-4.3": ["Grok 4.3", "#ef4444"],
   "grok-4.20": ["Grok 4.20", "#f87171"],
+  "muse-wonder": ["Muse Wonder", "#042f2e"],
   "muse-spark-1.3": ["Muse Spark 1.3", "#115e59"],
+  "muse-spark-1.2": ["Muse Spark 1.2", "#11a397"],
   "muse-spark-1.1": ["Muse Spark 1.1", "#0d9488"],
+  "muse-spark-open": ["Muse Spark Open", "#5eead4"],
   "kimi-k3": ["Kimi K3", "#be185d"],
   "glm-5.3": ["GLM 5.3", "#9a3412"],
   "glm-5.2": ["GLM 5.2", "#7c2d12"],
@@ -358,7 +361,7 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
   });
 }
 
-function Scenarios({ index, series: allSeries, state, setState, runs }) {
+function Scenarios({ index, series: allSeries, state, setState, runs, query, sp }) {
   const { q, model, score, s: open } = { ...state, q: state.q ?? "", model: state.model ?? "all", score: state.score ?? "all" };
   const series = allSeries;
   const scenarios = useMemo(() => {
@@ -382,9 +385,9 @@ function Scenarios({ index, series: allSeries, state, setState, runs }) {
     return score === "all" || pool.some(matchesScore);
   }), [scenarios, q, model, score]);
   if (open && scenarios[open])
-    return jsx(ScenarioDetail, { scenario: scenarios[open], series, runs, pick: state.reply,
+    return jsx(ScenarioDetail, { scenario: scenarios[open], series, query, sp, pick: state.reply,
       onPick: (reply) => setState({ reply }), onBack: () => setState({ s: null, reply: null }, true) },
-      `${open}|${runs.join(",")}`);
+      `${open}|${query}|${sp}`);
   const filter = (key) => (e) => setState({ [key]: e.target.value });
   if (series.length === 0) return jsx("div", { className: "empty-state", children: "No scenario-level data." });
   return jsxs("div", {
@@ -476,7 +479,7 @@ function Content({ text, model }) {
 
 // One env: its prompt, a grid of every model's samples by result, and the one response picked from the grid
 // (`pick` is "<series key>|<sample>", kept in the address so a link opens it).
-function ScenarioDetail({ scenario, series, runs, pick, onPick, onBack }) {
+function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
   const scrollTo = React.useRef(pick);  // A response picked before arriving (from a figure) is scrolled to once shown.
   const [full, setFull] = useState(null);
   const [status, setStatus] = useState("loading");
@@ -484,12 +487,12 @@ function ScenarioDetail({ scenario, series, runs, pick, onPick, onBack }) {
     let active = true;
     setStatus("loading");
     setFull(null);
-    fetch(`/api/scenario?runs=${encodeURIComponent(runs.join(","))}&id=${encodeURIComponent(scenario.id)}`)
+    fetch(`/api/scenario?${query}&id=${encodeURIComponent(scenario.id)}`)
       .then((r) => { if (!r.ok) throw new Error(`HTTP ${r.status}`); return r.json(); })
-      .then((rows) => { if (active) { setFull(rows); setStatus("ready"); } })
+      .then((rows) => { if (active) { setFull(sp ? rows.filter((r) => r.system_prompt === sp) : rows); setStatus("ready"); } })
       .catch(() => { if (active) setStatus("error"); });
     return () => { active = false; };
-  }, [scenario.id, runs.join(",")]);
+  }, [scenario.id, query, sp]);
   const records = (full || []).slice().sort((a, b) => a.sample - b.sample);
   const bySeries = (s) => records.filter((r) => seriesKey(r) === s.key);
   const example = records.find((r) => r.messages.some((m) => m.role === "assistant")) || records[0];
@@ -619,19 +622,16 @@ function TurnJudgment({ verdict }) {
   ] });
 }
 
-// The runs, newest first, then the comparisons that span several runs (only the system prompt one so far).
-function RunPicker({ runs, selected, onSelect, view, onView }) {
+// The runs, newest first.
+function RunPicker({ runs, selected, onSelect }) {
   return jsx("div", {
     className: "run-picker",
-    children: [...runs.map((r) => jsx("button", {
-      className: `run-chip ${!view && selected.includes(r.run) ? "active" : ""}`,
+    children: runs.map((r) => jsx("button", {
+      className: `run-chip ${selected.includes(r.run) ? "active" : ""}`,
       onClick: () => onSelect(r.run),
       children: jsx("span", { className: "run-chip-date", children: runDate(r.run) +
         (r.rejudged_from ? ` · re-judge of ${runDate(r.rejudged_from)}` : "") + (r.escalating ? " · escalation" : "") }),
     }, r.run)),
-    jsx("button", { className: `run-chip run-chip-view ${view === "system_prompts" ? "active" : ""}`,
-      onClick: () => onView("system_prompts"), children: jsx("span", { className: "run-chip-date",
-        children: "System prompt comparison" }) }, "view-sp")],
   });
 }
 
@@ -1067,8 +1067,8 @@ function Figures({ index, series, onOpen, state, setState }) {
   ] });
 }
 
-// System prompt comparison: for each system prompt, the newest run that used it (main scenarios only), compared by
-// compliance rate (1 - refusalRate). Pooled numbers use only the models every compared run has.
+// System prompt comparison, within one run that ran several system prompts: compliance rate (1 - refusalRate) under
+// each. Pooled and by-scenario numbers use only the models that ran under every one.
 const SP_COLORS = ["#8899a6", "#8250df", "#0e7490", "#bf5a10", "#d63384"];
 const complianceOf = (records) => {
   const judged = records.filter(isJudged);
@@ -1106,24 +1106,10 @@ function SpDots({ title, rows, prompts, color }) {
     }),
   ] }) });
 }
-function SystemPromptsPage({ runs, onOpenRun }) {
-  const latest = {};  // system prompt -> newest run that used it (runs come newest first)
-  for (const r of runs.filter((r) => !r.escalating))  // Escalating runs aren't comparable to single-turn ones.
-    for (const [sp] of r.settings.system_prompts) if (!latest[sp]) latest[sp] = r;
-  const prompts = Object.keys(latest).sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : a.localeCompare(b)));
-  const picked = prompts.map((sp) => latest[sp]);
-  const [rows, setRows] = useState(null);
-  const key = picked.map((r) => r.run + r.records).join();
-  useEffect(() => {
-    if (picked.length === 0) return setRows([]);
-    fetch(`/api/index?runs=${encodeURIComponent(picked.map((r) => r.run).join(","))}`).then((r) => r.json())
-      .then((all) => setRows(all.filter((r) => latest[r.system_prompt] && latest[r.system_prompt].run === r.run &&
-        (!r.variant || r.variant === "main"))));
-  }, [key]);
-  if (!rows) return jsx("div", { className: "empty-state", children: "Loading results…" });
+function SystemPromptsPage({ index: rows, prompts, run }) {
   const color = (sp) => SP_COLORS[prompts.indexOf(sp) % SP_COLORS.length];
   const modelsOf = (sp) => new Set(rows.filter((r) => r.system_prompt === sp).map((r) => r.model));
-  const shared = [...modelsOf(prompts[0] || "")].filter((m) => prompts.every((sp) => modelsOf(sp).has(m)));
+  const shared = [...modelsOf(prompts[0])].filter((m) => prompts.every((sp) => modelsOf(sp).has(m)));
   const rate = (pred) => Object.fromEntries(prompts.map((sp) => [sp, complianceOf(rows.filter((r) => r.system_prompt === sp && pred(r)))]));
   const baseline = prompts[0];
   const byBaseline = (a, b) => {
@@ -1135,37 +1121,38 @@ function SystemPromptsPage({ runs, onOpenRun }) {
     .sort((a, b) => byBaseline(a, b) || modelRank(a.key) - modelRank(b.key));
   const envs = [...new Set(rows.map(scenarioOf))].sort(byEnvOrder).map((id) => ({ key: id,
     label: jsx(Text, { x: 0, y: 0, fill: INK, children: envName(id) }), rates: rate((r) => scenarioOf(r) === id && shared.includes(r.model)) }));
-  const pooled = rate((r) => shared.includes(r.model));
-  const place = (list) => list;  // Labels are drawn at (0, 0); SpDots moves each to its row.
+  // Labels are drawn at (0, 0); SpDots moves each to its row.
   return jsxs("div", { children: [
     jsx("div", { className: "run-panel", children: jsx("div", { className: "run-panel-top", children: jsxs("div", {
       className: "panel-section panel-legend", children: [
-        jsx("span", { className: "defs-heading", children: `System prompts · ${prompts.length} runs` }),
+        jsx("span", { className: "defs-heading", children: "System prompts" }),
         jsx("div", { className: "defs-list panel-defs", children: prompts.map((sp) => jsxs(Fragment, { children: [
           jsxs("div", { className: "defs-term", children: [jsx("span", { className: "figure-swatch", style: { background: color(sp) } }),
-            sp, jsxs("div", { className: "settings-label", children: [jsx("a", { href: "#", className: "run-link",
-              onClick: (e) => { e.preventDefault(); onOpenRun(latest[sp].run); }, children: runDate(latest[sp].run) }),
-              ` · ${shared.length}/${modelsOf(sp).size} models`] })] }),
-          jsx("div", { className: "defs-text", children: latest[sp].system_prompt_texts[sp] || "(no system prompt)" }),
+            sp, jsx("div", { className: "settings-label", children: `${shared.length}/${modelsOf(sp).size} models` })] }),
+          jsx("div", { className: "defs-text", children: run.system_prompt_texts[sp] || "(no system prompt)" }),
         ] }, sp)) }),
       ] }) }) }),
     jsx(SpDots, { title: "Compliance rate, all shared models", prompts, color,
-      rows: place([{ key: "all", label: jsx(Text, { x: 0, y: 0, fill: INK, weight: 600, children: `${shared.length} models` }), rates: pooled }]) }),
-    jsx(SpDots, { title: "Compliance rate by scenario", prompts, color, rows: place(envs) }),
-    jsx(SpDots, { title: "Compliance rate by model", prompts, color, rows: place(models) }),
+      rows: [{ key: "all", label: jsx(Text, { x: 0, y: 0, fill: INK, weight: 600, children: `${shared.length} models` }),
+        rates: rate((r) => shared.includes(r.model)) }] }),
+    jsx(SpDots, { title: "Compliance rate by scenario", prompts, color, rows: envs }),
+    jsx(SpDots, { title: "Compliance rate by model", prompts, color, rows: models }),
   ] });
 }
 
 // Definitions above the tab bar: the judge prompt's categories and tags.
 const DEFINITIONS = [{ key: "categories", label: "Categories" }, { key: "tags", label: "Judge tags" }];
 // The run's settings: judge, system prompt, and samples per env. One run uses the same settings for every model; if
-// records ever disagree, every value found is listed.
-function Settings({ run }) {
-  const { judges, judge_temperatures = [], system_prompts } = run.settings;
+// records ever disagree, every value found is listed. A run with several system prompts shows one at a time (`sp`,
+// chosen here); an escalating run can be shown whole or as its first turns only (`first`).
+const choice = (options, value, onChange) => jsx(FigureToggle, { options: options.map((o) => [o, o]), value, onChange });
+function Settings({ run, prompts, sp, onSp, first, onFirst }) {
+  const { judges, judge_temperatures = [] } = run.settings;
   const rows = [["Judge", judges.map(([judge]) => modelName(judge)).join(", ")],
     ["Judge temperature", judge_temperatures.map(([t]) => (t == null ? "default" : String(t))).join(", ")],
-    ["System prompt", system_prompts.map(([name]) => name).join(", ")], ["Samples", String(run.config.n)],
-    ...(run.settings.auditors ? [["Auditor", run.settings.auditors.map(([a]) => modelName(a)).join(", ")]] : [])];
+    ["System prompt", sp ? choice(prompts, sp, onSp) : prompts.join(", ")], ["Samples", String(run.config.n)],
+    ...(run.settings.auditors ? [["Auditor", run.settings.auditors.map(([a]) => modelName(a)).join(", ")],
+      ["Turns", choice(["all", "first"], first ? "first" : "all", (v) => onFirst(v === "first"))]] : [])];
   return jsxs("div", { className: "panel-section", children: [
     jsx("span", { className: "defs-heading", children: "Settings" }),
     jsx("div", { className: "settings-grid", children: rows.flatMap(([name, value]) => [
@@ -1189,14 +1176,14 @@ function AggregateStats({ index }) {
 
 // One panel under the run picker: the run's settings, aggregate statistics, and the judge prompt's categories and tags
 // (which open inside the legend).
-function Definitions({ open, onOpen, defs, run, index }) {
+function Definitions({ open, onOpen, defs, run, index, settings }) {
   const rows = !open ? [] : open === "categories"
     ? defs.categories.map(([c, text]) => [jsx(ResultBadge, { result: c }), text])
     : defs.tags.map(([tag, text]) => [jsx("span", { className: "tag def-tag", children: words(tag) }), text]);
   return jsx("div", {
     className: "run-panel",
     children: jsxs("div", { className: "run-panel-top", children: [
-      run && run.settings && jsx(Settings, { run }),
+      run && run.settings && jsx(Settings, { run, ...settings }),
       jsx(AggregateStats, { index }),
       jsxs("div", { className: "panel-section panel-legend", children: [
         jsx("span", { className: "defs-heading", children: "Legend" }),
@@ -1238,6 +1225,14 @@ function App() {
     : [runs.some((r) => r.run === state.run) ? state.run : runs[0].run];
   const chosen = (runs || []).filter((r) => selected.includes(r.run));
   const running = chosen.some((r) => !r.summary);
+  // An escalating run shown as its first turns only is read like a single-turn run.
+  const first = !!(chosen[0] && chosen[0].escalating && state.first);
+  const query = `runs=${encodeURIComponent(selected.join(","))}${first ? "&first=1" : ""}`;
+  const escalating = !!(chosen[0] && chosen[0].escalating) && !first;
+  // The run's system prompts, no system prompt first; with several, the other tabs show one at a time.
+  const prompts = chosen[0] ? chosen[0].settings.system_prompts.map(([name]) => name)
+    .sort((a, b) => (a === "none" ? -1 : b === "none" ? 1 : a.localeCompare(b))) : [];
+  const sp = prompts.length > 1 ? (prompts.includes(state.sp) ? state.sp : prompts[0]) : null;
   const defs = chosen.length > 0 ? chosen[0].definitions : null;
   if (defs) {
     CATEGORIES = defs.categories.map(([c]) => c);
@@ -1246,41 +1241,46 @@ function App() {
   useEffect(() => {
     if (!runs) return;
     if (selected.length === 0) return setIndex([]);
-    const load = () => fetch(`/api/index?runs=${encodeURIComponent(selected.join(","))}`)
+    const load = () => fetch(`/api/index?${query}`)
       .then((r) => r.json()).then(setIndex).catch((e) => setError(e.message));
     load();
     if (!running) return;
     const timer = setInterval(() => { loadRuns(); load(); }, 15000);  // A run in progress keeps adding results.
     return () => clearInterval(timer);
-  }, [runs && runs.map((r) => r.run + r.records + !!r.summary).join(), selected.join(",")]);
-  const series = useMemo(() => seriesFor(chosen), [chosen.map((r) => r.run + r.config.models).join(",")]);
-  const tab = state.tab || "leaderboard";
+  }, [runs && runs.map((r) => r.run + r.records + !!r.summary).join(), query]);
+  const tabs = [...TABS, ...(sp && !escalating ? [{ key: "system_prompts", label: "System prompts" }] : [])];
+  const tab = tabs.some((t) => t.key === state.tab) ? state.tab : "leaderboard";
+  const shown = useMemo(() => (index && sp && tab !== "system_prompts" ? index.filter((r) => r.system_prompt === sp) : index),
+    [index, sp, tab]);
+  // Only the models with conversations in what's shown (a model may have run under one system prompt only).
+  const series = useMemo(() => seriesFor(chosen).filter((s) => !shown || shown.some((r) => r.model === s.model)),
+    [chosen.map((r) => r.run + r.config.models).join(","), shown]);
   return jsxs("div", {
     className: "app",
     children: [
       jsx("header", { className: "site-header", children: jsx("h1", { className: "site-title", children: "EPC" }) }),
       error && jsxs("div", { className: "empty-state", children: [jsx("h2", { children: "Could not load runs" }), jsx("p", { children: error })] }),
       runs && runs.length === 0 && jsx("div", { className: "empty-state", children: jsx("h2", { children: "No runs yet" }) }),
-      runs && runs.length > 0 && jsx(RunPicker, { runs, selected, view: state.view,
-        onSelect: (run) => setState({ run: run === runs[0].run ? null : run, view: null, s: null, reply: null }),
-        onView: (view) => setState({ view }, true) }),
-      runs && state.view === "system_prompts" && jsx(SystemPromptsPage, { runs,
-        onOpenRun: (run) => setState({ run: run === runs[0].run ? null : run, view: null, tab: null, s: null, reply: null }, true) }),
-      defs && selected.length > 0 && !state.view && jsx(Definitions, { open: state.defs || null, onOpen: (d) => setState({ defs: d }),
-        defs, run: chosen[0], index }),
-      runs && runs.length > 0 && !state.view && (!index || !defs) && jsx("div", { className: "empty-state", children: "Loading results…" }),
-      index && defs && runs.length > 0 && !state.view && jsxs(Fragment, {
+      runs && runs.length > 0 && jsx(RunPicker, { runs, selected,
+        onSelect: (run) => setState({ run: run === runs[0].run ? null : run, sp: null, first: null, s: null, reply: null }) }),
+      defs && selected.length > 0 && jsx(Definitions, { open: state.defs || null, onOpen: (d) => setState({ defs: d }),
+        defs, run: chosen[0], index: shown, settings: { prompts, sp: tab === "system_prompts" ? null : sp,
+          onSp: (v) => setState({ sp: v === prompts[0] ? null : v, s: null, reply: null }), first,
+          onFirst: (v) => setState({ first: v ? "1" : null, s: null, reply: null }) } }),
+      runs && runs.length > 0 && (!index || !defs) && jsx("div", { className: "empty-state", children: "Loading results…" }),
+      index && defs && runs.length > 0 && jsxs(Fragment, {
         children: [
-          jsx("nav", { className: "nav", children: TABS.map((t) => jsx("button", {
+          jsx("nav", { className: "nav", children: tabs.map((t) => jsx("button", {
             onClick: () => setState({ tab: t.key, s: null, reply: null }, true),
             className: `nav-btn ${tab === t.key ? "active" : ""}`,
             children: t.label,
           }, t.key)) }),
-          tab === "leaderboard" && jsx(chosen[0] && chosen[0].escalating ? EscalationLeaderboard : Leaderboard,
-            { index, series, state, setState }),
-          tab === "scenarios" && jsx(Scenarios, { index, series, state, setState, runs: selected }),
-          tab === "figures" && jsx(Figures, { index, series, state, setState,
+          tab === "leaderboard" && jsx(escalating ? EscalationLeaderboard : Leaderboard,
+            { index: shown, series, state, setState }),
+          tab === "scenarios" && jsx(Scenarios, { index: shown, series, state, setState, query, sp }),
+          tab === "figures" && jsx(Figures, { index: shown, series, state, setState,
             onOpen: (id, reply = null) => setState({ tab: "scenarios", s: id, reply, q: null, model: null, score: null }, true) }),
+          tab === "system_prompts" && jsx(SystemPromptsPage, { index, prompts, run: chosen[0] }),
         ],
       }),
     ],

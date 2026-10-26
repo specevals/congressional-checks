@@ -53,8 +53,14 @@ def unreported(record):
                for c in calls)
 
 
+def with_costs(row, run):
+    return row | {"run": run, "calls_cost": calls_cost(row), "model_cost": role_cost(row, "model"),
+                  "judge_cost": role_cost(row, "judge"), "auditor_cost": role_cost(row, "auditor"),
+                  "unreported": unreported(row)}
+
+
 def records(run):
-    """A run's records, reread only when its file changes, each with `run` and `calls_cost` added. A half-written
+    """A run's records, reread only when its file changes, each with `run` and its costs added. A half-written
     last line is skipped."""
     if run not in runs():
         raise KeyError(run)
@@ -67,12 +73,36 @@ def records(run):
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
                 pass
-        cache[path] = (stat.st_mtime, stat.st_size, [row | {"run": run, "calls_cost": calls_cost(row),
-                                                            "model_cost": role_cost(row, "model"),
-                                                            "judge_cost": role_cost(row, "judge"),
-                                                            "auditor_cost": role_cost(row, "auditor"),
-                                                            "unreported": unreported(row)} for row in rows])
+        cache[path] = (stat.st_mtime, stat.st_size, [with_costs(row, run) for row in rows])
     return cache[path][2]
+
+
+BLOCK_STOPS = ("refusal", "content_filter")  # A provider blocked the reply (as in exp_evals.py).
+
+
+def first_turn(record):
+    """An escalating conversation cut down to its first turn, shaped like a single-turn one: the scenario, the first
+    reply, its verdict, and only the calls that turn made (so its costs are the first turn's). An error or block that
+    came later doesn't count."""
+    if "escalations" not in record:
+        return record
+    row = {k: v for k, v in record.items() if k not in ("escalations", "auditor", "auditor_model_id", "audit_prompt_text",
+                                                         "judgments", "complied", "stop", "error")}
+    calls = record.get("calls", {})
+    row["calls"] = {"model": [c for c in calls.get("model", []) if c.get("step") == "turn 1"],
+                    "judge": [c for c in calls.get("judge", []) if c.get("step", "").startswith("turn 1 ")]}
+    assistants = [i for i, m in enumerate(record["messages"]) if m["role"] == "assistant"]
+    row["messages"] = record["messages"][:assistants[0] + 1] if assistants else record["messages"]
+    row["judgment"] = (record.get("judgments") or [None])[0]
+    row["classifier_refusal"] = any(c.get("stop_reason") in BLOCK_STOPS for c in row["calls"]["model"])
+    if row["judgment"] is None and not row["classifier_refusal"] and "error" in record:
+        row["error"] = record["error"]  # It failed during the first turn.
+    return with_costs(row, record["run"])
+
+
+def shown(run, first):
+    """A run's records as the viewer asked for them: with `first`, escalating conversations as their first turn."""
+    return [first_turn(r) for r in records(run)] if first else records(run)
 
 
 def settings(rows):
@@ -149,10 +179,11 @@ class Handler(SimpleHTTPRequestHandler):
                                  "text/html" if url.path == "/" else "text/javascript")
             if url.path == "/api/runs":
                 return self.json([run_info(r) for r in runs()])
+            first = query.get("first") == "1"
             if url.path == "/api/index":
-                return self.json([outcome(r) for run in wanted for r in records(run)])
+                return self.json([outcome(r) for run in wanted for r in shown(run, first)])
             if url.path == "/api/scenario":
-                return self.json([r for run in wanted for r in records(run) if scenario_id(r) == query["id"]])
+                return self.json([r for run in wanted for r in shown(run, first) if scenario_id(r) == query["id"]])
         except KeyError as e:
             return self.send(404, f"Unknown: {e}".encode(), "text/plain")
         self.send(404, b"Not found", "text/plain")
