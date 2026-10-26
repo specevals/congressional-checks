@@ -11,4 +11,4 @@ dependencies = [
 dev = ["pytest"]
 
 [tool.uv.sources]
-llm = { path = "../../llm", editable = true }
+llm = { git = "https://github.com/otenwerry/llm" }
