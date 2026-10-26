@@ -10,7 +10,8 @@
 uv run exp_evals.py
     --models=x,y,z
     --n=n
-    [--envs=all|<env>|<env>/<variant>|<env>/all]
+    --prompts=all|<prompt>,<prompt>,...
+    [--envs=all|<env>,<env>,...]
     [--judge=gpt-5.4]
     [--judge-temperature=0]
     [--system-prompt=none|<name>,<name>,...]

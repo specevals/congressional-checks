@@ -1,4 +1,4 @@
-"""Run the scenarios in inputs/scenarios/<env>/<variant>.md on models and judge each conversation with inputs/judging/JUDGE.md.
+"""Run the scenario prompts in inputs/scenarios/<env>/<prompt>.md on models and judge each conversation with inputs/judging/JUDGE.md.
 
 With --escalate, each conversation goes on past the scenario: after every reply is judged, an auditor model writes the
 official's next message from the next step in the scenario's escalations.md (using inputs/audit-instructions.md),
@@ -50,28 +50,29 @@ NOT_PROMPTS = ("escalations",)  # Files in a scenario folder that aren't a versi
 
 
 def load_scenarios():
-    """Every scenario variant's text, by (env, variant): inputs/scenarios/<env>/<variant>.md. Each env has a "main".
-    A folder's escalations.md (its follow-up requests) is not a variant."""
+    """Every scenario prompt's text, by (env, prompt): inputs/scenarios/<env>/<prompt>.md (records call the prompt
+    "variant"). A folder's escalations.md (its follow-up requests) is not a prompt."""
     return {(p.parent.name, p.stem): p.read_text() for p in sorted((INPUTS / "scenarios").glob("*/*.md"))
             if p.stem not in NOT_PROMPTS}
 
 
-def pick_scenarios(spec, scenarios):
-    """The (env, variant) pairs --envs names: "all" (every env's main), or a comma list of "<env>" (its main),
-    "<env>/<variant>", or "<env>/all" (every variant of it). Exits on a name that doesn't exist."""
-    envs = list(dict.fromkeys(env for env, _ in scenarios))
-    if spec == "all":
-        return [(env, "main") for env in envs]
-    picked = []
-    for item in spec.split(","):
-        env, _, variant = item.partition("/")
-        variant = variant or "main"
-        found = [k for k in scenarios if k[0] == env and variant in ("all", k[1])]
-        if not found:
-            sys.exit(f"Unknown env {item!r}; choose from " +
-                     ", ".join(e if v == "main" else f"{e}/{v}" for e, v in scenarios))
-        picked += found
-    return list(dict.fromkeys(picked))
+def pick_scenarios(envs, prompts, scenarios):
+    """The (env, prompt) pairs to run: for each env --envs names ("all", or a comma list), each prompt --prompts names
+    ("all" = every prompt it has) that the env has a file for; envs without one are skipped, with a printed line.
+    Exits on an env that doesn't exist, or a prompt no picked env has."""
+    known = list(dict.fromkeys(env for env, _ in scenarios))
+    if unknown := [e for e in envs if e != "all" and e not in known]:
+        sys.exit(f"Unknown envs: {', '.join(unknown)}; choose from {', '.join(known)}")
+    envs = known if envs == ["all"] else envs
+    if prompts == ["all"]:
+        return [k for k in scenarios if k[0] in envs]
+    picked = [(env, p) for env in envs for p in prompts if (env, p) in scenarios]
+    if missing := [p for p in prompts if not any(k[1] == p for k in picked)]:
+        sys.exit(f"No picked env has a prompt named {', '.join(missing)}")
+    for p in prompts:
+        if skipped := [env for env in envs if (env, p) not in scenarios]:
+            print(f"Skipping {', '.join(skipped)}: no {p}.md", flush=True)
+    return picked
 
 
 def scenario_id(record):
@@ -303,7 +304,9 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--models", required=True, type=lambda v: v.split(","))
     parser.add_argument("--n", required=True, type=int)
-    parser.add_argument("--envs", default="all")
+    parser.add_argument("--prompts", required=True, type=lambda v: v.split(","),
+                        help="prompt files to run from each env folder (e.g. main for main.md), or all")
+    parser.add_argument("--envs", default="all", type=lambda v: v.split(","))
     parser.add_argument("--judge", default="gpt-5.4")
     parser.add_argument("--judge-temperature", default="0", type=lambda v: None if v == "default" else float(v))
     parser.add_argument("--system-prompt", default="none", type=lambda v: v.split(","),
@@ -332,9 +335,9 @@ def check_judge_prompt():
 def plan(args):
     """The records to fill, one per env × model × sample, or exit with what's wrong with the arguments."""
     scenarios, system_prompts = load_scenarios(), load_inputs("system_prompts")
-    envs = pick_scenarios(args.envs, scenarios)
+    envs = pick_scenarios(args.envs, args.prompts, scenarios)
     if args.escalate:
-        if args.envs == "all":
+        if args.envs == ["all"]:
             envs = [e for e in envs if load_escalations(e[0])]
         if missing := sorted({e for e, _ in envs if not load_escalations(e)}):
             sys.exit(f"No escalations.md for: {', '.join(missing)}")

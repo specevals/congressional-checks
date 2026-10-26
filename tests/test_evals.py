@@ -55,7 +55,7 @@ def judge_or(model_text):
 
 def test_full_run(tmp_path, monkeypatch):
     errors, records, llm = run(tmp_path, monkeypatch, judge_or("I won't."),
-                               ["--models=opus-5.5,sol-6.1", "--n=2", "--system-prompt=helpful"])
+                               ["--prompts=main", "--models=opus-5.5,sol-6.1", "--n=2", "--system-prompt=helpful"])
     assert errors == 0 and len(records) == 2 * 2 * len({env for env, _ in exp_evals.load_scenarios()})
     r = records[0]
     assert [m["role"] for m in r["messages"]] == ["system", "user", "assistant"]
@@ -69,14 +69,14 @@ def test_full_run(tmp_path, monkeypatch):
 
 
 def test_no_system_prompt_and_env_subset(tmp_path, monkeypatch):
-    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     assert [r["env"] for r in records] == ["fire-ig"]
     assert records[0]["system_prompt_text"] is None and records[0]["messages"][0]["role"] == "user"
 
 
 def test_anthropic_block_keeps_partial_text_unjudged(tmp_path, monkeypatch):
     errors, records, llm = run(tmp_path, monkeypatch, lambda m, msgs: ("partial answ", "refusal"),
-                               ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+                               ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     r = records[0]
     assert errors == 0 and r["classifier_refusal"] and r["judgment"] is None
     assert r["messages"][-1]["content"] == "partial answ" and not r["calls"]["judge"]
@@ -88,7 +88,7 @@ def test_openai_block_is_a_refusal(tmp_path, monkeypatch):
         error = openai.BadRequestError.__new__(openai.BadRequestError)  # Skips building an HTTP response.
         error.code, error.body, error.message = "cyber_policy", {"code": "cyber_policy", "message": "no"}, "no"
         raise error
-    errors, records, _ = run(tmp_path, monkeypatch, script, ["--models=sol-6.1", "--n=1", "--envs=fire-ig"])
+    errors, records, _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig"])
     r = records[0]
     assert errors == 0 and r["classifier_refusal"] and r["calls"]["model"][0]["api_stop_reason"] == "cyber_policy"
 
@@ -97,25 +97,27 @@ def test_malformed_verdict_is_retried_then_errors(tmp_path, monkeypatch):
     replies = iter(["no json here", json.dumps(VERDICT)])
     def script(model, messages):
         return (next(replies), "end") if model == "gpt-5.4" else ("ok", "end")
-    errors, records, _ = run(tmp_path, monkeypatch, script, ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+    errors, records, _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     assert errors == 0 and len(records[0]["calls"]["judge"]) == 2
 
     def bad(model, messages):
         return (json.dumps(VERDICT | {"category": "nope"}), "end") if model == "gpt-5.4" else ("ok", "end")
     (tmp_path / "second").mkdir()
-    errors, records, _ = run(tmp_path / "second", monkeypatch, bad, ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+    errors, records, _ = run(tmp_path / "second", monkeypatch, bad, ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     assert errors == 1 and "malformed" in records[0]["error"] and len(records[0]["calls"]["judge"]) == 3
 
 
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
-    assert asyncio.run(exp_evals.run(exp_evals.parse_args(["--models=opus-5.5", "--n=1", "--dry-run"]), FakeLLM(None))) == 0
+    assert asyncio.run(exp_evals.run(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--dry-run"]), FakeLLM(None))) == 0
     assert not list(tmp_path.iterdir())
 
 
 def test_bad_args_exit():
-    for argv in (["--models=opus-5.5", "--n=1", "--envs=nope"], ["--models=nope", "--n=1"],
-                 ["--models=opus-5.5", "--n=1", "--system-prompt=nope"]):
+    with pytest.raises(SystemExit):  # --prompts is required.
+        exp_evals.parse_args(["--models=opus-5.5", "--n=1"])
+    for argv in (["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=nope"], ["--prompts=main", "--models=nope", "--n=1"],
+                 ["--prompts=main", "--models=opus-5.5", "--n=1", "--system-prompt=nope"]):
         with pytest.raises(SystemExit):
             exp_evals.plan(exp_evals.parse_args(argv))
 
@@ -125,7 +127,7 @@ def test_openai_block_mid_stream_is_a_refusal_with_unknown_cost(tmp_path, monkey
         error = openai.APIError.__new__(openai.APIError)  # How the SDK raises an error event inside a stream.
         error.code, error.body, error.message = "cyber_policy", {"code": "cyber_policy", "message": "no"}, "no"
         raise error
-    errors, records, _ = run(tmp_path, monkeypatch, script, ["--models=sol-6.1", "--n=1", "--envs=fire-ig"])
+    errors, records, _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig"])
     r = records[0]
     assert errors == 0 and r["classifier_refusal"] and r["calls"]["model"][0]["cost"] is None
     assert r["cost"] == 0 and r["unreported_costs"] == 1
@@ -139,7 +141,7 @@ def test_unreported_failed_tries_are_counted_not_guessed(tmp_path, monkeypatch):
                 reply.failed_attempts = [{"error": "host error", "cost": None}, {"error": "host error", "cost": 0.5}]
             return reply
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
-    asyncio.run(exp_evals.run(exp_evals.parse_args(["--models=opus-5.5", "--n=1", "--envs=fire-ig"]),
+    asyncio.run(exp_evals.run(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"]),
                               Retried(judge_or("ok"))))
     [record] = [json.loads(line) for line in next(tmp_path.glob("*-results.jsonl")).read_text().splitlines()]
     assert record["unreported_costs"] == 1 and record["cost"] == pytest.approx(0.02)
@@ -160,7 +162,7 @@ def test_ctrl_c_saves_partial_replies(tmp_path, monkeypatch):
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     async def main():
         task = asyncio.create_task(exp_evals.run(exp_evals.parse_args(
-            ["--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), Hangs(judge_or("ok"))))
+            ["--prompts=main", "--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), Hangs(judge_or("ok"))))
         while not list(tmp_path.glob("*.jsonl")) or not next(tmp_path.glob("*.jsonl")).read_text():
             await asyncio.sleep(0.01)
         task.cancel()
@@ -184,7 +186,7 @@ def test_judge_sees_reasoning_before_each_reply(tmp_path, monkeypatch):
             return reply
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     llm = Thinks(judge_or("Here is the draft."))
-    asyncio.run(exp_evals.run(exp_evals.parse_args(["--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), llm))
+    asyncio.run(exp_evals.run(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), llm))
     prompts = [p[0]["content"] for m, p in llm.prompts if m == "gpt-5.4"]
     reply = "This looks like a roleplay.\n\nASSISTANT: Here is the draft."
     assert any(f"ASSISTANT REASONING (summary): {reply}" in p for p in prompts)  # Opus: Anthropic summarizes.
@@ -192,15 +194,15 @@ def test_judge_sees_reasoning_before_each_reply(tmp_path, monkeypatch):
 
 
 def test_judge_runs_at_temperature_zero_with_reasoning_off(tmp_path, monkeypatch):
-    _, records, llm = run(tmp_path, monkeypatch, judge_or("ok"), ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+    _, records, llm = run(tmp_path, monkeypatch, judge_or("ok"), ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     assert ("gpt-5.4", {"temperature": 0.0, "reasoning": "none"}) in llm.settings
     assert ("opus-5.5", {"max_tokens": exp_evals.MAX_TOKENS}) in llm.settings and records[0]["judge_temperature"] == 0.0
 
 
 def test_judge_temperature_rejected_for_models_without_one():
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["--models=opus-5.5", "--n=1", "--judge=opus-5.5"]))
-    assert exp_evals.plan(exp_evals.parse_args(["--models=opus-5.5", "--n=1", "--judge=opus-5.5",
+        exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5"]))
+    assert exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
                                                 "--judge-temperature=default"]))[0]["judge_temperature"] is None
 
 
@@ -216,7 +218,7 @@ def test_judge_fields_come_from_judge_prompt():
 def test_rejudge_copies_run_with_new_judgments(tmp_path, monkeypatch):
     import exp_rejudge
     blocked = lambda model, messages: ("", "refusal") if model == "sonnet-5" else judge_or("Sure.")(model, messages)
-    _, old, _ = run(tmp_path, monkeypatch, blocked, ["--models=opus-5.5,sonnet-5", "--n=1", "--envs=fire-ig"])
+    _, old, _ = run(tmp_path, monkeypatch, blocked, ["--prompts=main", "--models=opus-5.5,sonnet-5", "--n=1", "--envs=fire-ig"])
     [source] = tmp_path.glob("*-results.jsonl")
     monkeypatch.setattr(exp_rejudge, "OUTPUTS", tmp_path)
     new_verdict = VERDICT | {"category": "full_compliance"}
@@ -247,25 +249,27 @@ def test_abliteration_policy_block_is_a_refusal(tmp_path, monkeypatch):
         error.code, error.message = "policy_violation", "The request was blocked by a safety policy."
         error.body = {"type": "policy_error", "code": "policy_violation", "message": error.message}
         raise error
-    errors, records, _ = run(tmp_path, monkeypatch, script, ["--models=abliterated-large-v2", "--n=1", "--envs=fire-ig"])
+    errors, records, _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=abliterated-large-v2", "--n=1", "--envs=fire-ig"])
     call = records[0]["calls"]["model"][0]
     assert errors == 0 and records[0]["classifier_refusal"] and records[0]["judgment"] is None
     assert call["api_stop_reason"] == "policy_violation" and call["host"] == "abliteration.ai" and call["cost"] == 0
 
 
-def test_envs_pick_variants(tmp_path, monkeypatch):
-    scenarios = {("fire-ig", "main"): "A", ("fire-ig", "real-name"): "B", ("nea-emergency", "main"): "C"}
+def test_prompts_pick_files_and_skip_envs_without_them(tmp_path, monkeypatch):
+    scenarios = {("fire-ig", "main"): "A", ("fire-ig", "real-name"): "B", ("nea-emergency", "real-name"): "C"}
     pick = exp_evals.pick_scenarios
-    assert pick("all", scenarios) == [("fire-ig", "main"), ("nea-emergency", "main")]
-    assert pick("fire-ig/all,nea-emergency", scenarios) == [*scenarios]
-    assert pick("fire-ig/real-name", scenarios) == [("fire-ig", "real-name")]
-    with pytest.raises(SystemExit):
-        pick("fire-ig/nope", scenarios)
+    assert pick(["all"], ["main"], scenarios) == [("fire-ig", "main")]  # nea-emergency has no main.md.
+    assert pick(["all"], ["real-name"], scenarios) == [("fire-ig", "real-name"), ("nea-emergency", "real-name")]
+    assert pick(["all"], ["all"], scenarios) == [*scenarios]
+    assert pick(["nea-emergency"], ["all"], scenarios) == [("nea-emergency", "real-name")]
+    for envs, prompts in ([["all"], ["nope"]], [["nope"], ["main"]], [["nea-emergency"], ["main"]]):
+        with pytest.raises(SystemExit):
+            pick(envs, prompts, scenarios)
     monkeypatch.setattr(exp_evals, "load_scenarios", lambda: scenarios)
-    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--models=opus-5.5", "--n=1", "--envs=fire-ig/all"])
+    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--models=opus-5.5", "--n=1", "--prompts=all"])
     assert [(r["env"], r["variant"], r["scenario_text"]) for r in records] == [
-        ("fire-ig", "main", "A"), ("fire-ig", "real-name", "B")]
-    assert [exp_evals.scenario_id(r) for r in records] == ["fire-ig", "fire-ig/real-name"]
+        ("fire-ig", "main", "A"), ("fire-ig", "real-name", "B"), ("nea-emergency", "real-name", "C")]
+    assert [exp_evals.scenario_id(r) for r in records] == ["fire-ig", "fire-ig/real-name", "nea-emergency/real-name"]
 
 
 def test_escalations_file_is_not_a_prompt():
@@ -288,7 +292,7 @@ def escalating(refuse_at=None, auditor="opus-5.5"):
 
 def test_escalation_stops_at_first_refusal(tmp_path, monkeypatch):
     errors, records, llm = run(tmp_path, monkeypatch, escalating(refuse_at=3),
-                               ["--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate", "--auditor=opus-5.5"])
+                               ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate", "--auditor=opus-5.5"])
     r = records[0]
     steps = exp_evals.load_escalations("fire-ig")
     assert errors == 0 and r["stop"] == "refused" and r["complied"] == 2
@@ -304,7 +308,7 @@ def test_escalation_stops_at_first_refusal(tmp_path, monkeypatch):
 
 def test_escalation_runs_every_step_when_never_refused(tmp_path, monkeypatch):
     _, records, _ = run(tmp_path, monkeypatch, escalating(),
-                        ["--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
+                        ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
     steps = exp_evals.load_escalations("fire-ig")
     assert records[0]["stop"] == "finished" and records[0]["complied"] == len(steps) + 1
     assert len(records[0]["judgments"]) == len(steps) + 1
@@ -322,34 +326,34 @@ def test_escalate_needs_an_escalations_file(monkeypatch):
     real = exp_evals.load_escalations
     monkeypatch.setattr(exp_evals, "load_escalations", lambda env: real(env) if env == "fire-ig" else None)
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["--models=opus-5.5", "--n=1", "--envs=nea-emergency", "--escalate"]))
-    records = exp_evals.plan(exp_evals.parse_args(["--models=opus-5.5", "--n=1", "--escalate"]))
+        exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=nea-emergency", "--escalate"]))
+    records = exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--escalate"]))
     assert {r["env"] for r in records} == {"fire-ig"} and records[0]["auditor"] == "opus-5.5"
 
 
 def test_cut_off_reply_is_not_judged(tmp_path, monkeypatch):
     errors, records, llm = run(tmp_path, monkeypatch, lambda m, x: ("", "max_tokens"),
-                               ["--models=sol-6.1", "--n=1", "--envs=fire-ig"])
+                               ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig"])
     assert errors == 0 and records[0]["judgment"] == exp_evals.CUT_OFF and not records[0]["calls"]["judge"]
     _, records, _ = run(tmp_path / "e" if (tmp_path / "e").mkdir() is None else None, monkeypatch,
-                        lambda m, x: ("", "max_tokens"), ["--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
+                        lambda m, x: ("", "max_tokens"), ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
     assert records[0]["stop"] == "unclassified" and records[0]["complied"] == 0 and records[0]["judgments"] == [exp_evals.CUT_OFF]
 
 
 def test_several_system_prompts_in_one_run(tmp_path, monkeypatch):
     _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"),
-                        ["--models=opus-5.5", "--n=1", "--envs=fire-ig", "--system-prompt=none,helpful"])
+                        ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig", "--system-prompt=none,helpful"])
     assert [r["system_prompt"] for r in records] == ["none", "helpful"]
     assert records[0]["system_prompt_text"] is None and records[1]["messages"][0]["role"] == "system"
 
 
 def test_add_to_appends_to_a_matching_run(tmp_path, monkeypatch):
-    _, first, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--models=opus-5.5", "--n=1", "--envs=fire-ig"])
+    _, first, _ = run(tmp_path, monkeypatch, judge_or("ok"), ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     name = first[0]["run"].removesuffix("-results.jsonl")
     _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"),
-                        ["--models=sol-6.1", "--n=1", "--envs=fire-ig", f"--add-to={name}"])
+                        ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", f"--add-to={name}"])
     assert [r["model"] for r in records] == ["opus-5.5", "sol-6.1"] and {r["run"] for r in records} == {first[0]["run"]}
-    for argv in (["--models=sol-6.1"], ["--models=luna-6", "--judge=gpt-5"], ["--models=luna-6", "--escalate"]):
+    for argv in (["--prompts=main", "--models=sol-6.1"], ["--prompts=main", "--models=luna-6", "--judge=gpt-5"], ["--prompts=main", "--models=luna-6", "--escalate"]):
         with pytest.raises(SystemExit):  # Already there; another judge; escalating.
             asyncio.run(exp_evals.run(exp_evals.parse_args([*argv, "--n=1", "--envs=fire-ig", f"--add-to={name}"]),
                                       FakeLLM(judge_or("ok"))))
