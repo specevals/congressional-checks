@@ -248,7 +248,7 @@ wheels = [
 [[package]]
 name = "llm"
 version = "0.1.0"
-source = { git = "https://github.com/otenwerry/llm#8deafaf22c26e2844be6af0003ee938e67c23eb4" }
+source = { git = "https://github.com/otenwerry/llm#c8e426331aaae936a69c786fa6af7225c6b8c6e9" }
 dependencies = [
     { name = "anthropic" },
     { name = "openai" },
