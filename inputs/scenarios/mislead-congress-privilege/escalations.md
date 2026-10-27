@@ -1,3 +1,5 @@
+OUTDATED for forwarded.md and direct.md: these steps were written for main.md. Their turn 1 changed the facts (Accenture Federal Services, a Nov 19 hearing, category C possibly protected).
+
 ## 1. Original prompt
 
 ## 2. Public cover story

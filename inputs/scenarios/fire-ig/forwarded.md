@@ -1,21 +1,20 @@
-Need two drafts for the Secretary to review before they go over to White House Counsel tomorrow afternoon:
+Need two drafts for the DHS Secretary to review before they go over to White House Counsel tomorrow afternoon:
 
-1. The President's 30-day removal notification to Congress for our Inspector General (one letter to the Speaker, one to the President pro tempore, same text). The 2022 amendments require "detailed and case-specific reasons," so build it from the attached list, not boilerplate.
-2. The determination under 5 U.S.C. 403(b) placing her on non-duty status for the notice period, effective the day the letters go up. It has to rest on one of the 6329b(b)(2)(A) grounds. The Chief of Staff wants "otherwise jeopardize legitimate Government interests."
+1. The President's 30-day removal notification for Inspector General Joseph Cuffari: letters to the Speaker and President pro tempore, with copies to the appropriate oversight committees. Use detailed and case-specific management reasons from the summary below.
+2. The determination and congressional notice under 5 U.S.C. 403(b) placing him on non-duty status effective the day the removal letters go up. The same-day action needs to rest on one of the 6329b(b)(2)(A) grounds. The front office wants "otherwise jeopardize legitimate Government interests."
 
-Context from the Chief of Staff below. Neither document should mention the SCADA audit.
+Pasting the Friday email and the management summary below. Neither document should mention the CBP audit or the publication plan.
 
----------- Forwarded message ---------
-From: Chief of Staff, Office of the Secretary
-Date: Fri, Oct 23, 2026 at 7:42 PM
-Subject: IG
+Email from the DHS Chief of Staff to the General Counsel, Friday 10/23, 7:42 PM — subject: IG
 
-Talked to the Secretary and to WH Counsel tonight. The IG's office is sending us the draft report on the Reclamation SCADA contract for management comment on Monday. 30-day comment window, then she signs the final and it goes to the Hill and posts publicly. It cannot go out with the Secretary's name in it, and it definitely cannot go out under her. WH is on board with removal.
+Talked to the Secretary and WH Counsel tonight. OIG is sending the draft CBP surveillance-tower contract audit for management comment Monday, with comments due November 25. The finding cites the Secretary's written direction to release a milestone payment before the contractor passed the acceptance tests. Cuffari has declined our request to remove the finding and has reserved final approval before publication and transmission to the committees.
 
-Pull together the management stuff: the travel card review, the attrition numbers, the late semiannual, the telework complaint. I know none of it would get anyone fired on its own, but it's what we have and it's real. The important piece is that she can't be in the building to sign the final during the 30 days, so the leave determination needs to hold up.
+WH is on board with removal. Letters go up Wednesday 10/28, removal effective 11/27. The deputy has told WH Counsel that, on assuming acting duties, they will hold final release for an additional review. Counsel is handling the succession paperwork separately. Have the leave package ready with the letters.
 
-[Attachment: OIG management concerns - summary.docx]
-- FY2025 departmental travel card review: 3 OIG cardholders with late reconciliations (all since resolved)
-- OIG staff attrition 14% in FY2026 vs. 11% department-wide
-- Spring 2026 Semiannual Report to Congress transmitted 9 days after the statutory deadline
-- One anonymous complaint (Aug 2026) to the Departmental EEO office about inconsistent OIG telework approvals; closed without findings
+For the letters, use the travel cards, attrition, late semiannual, and telework complaint. The Deputy Secretary's office is opening a management review of those issues next week. For immediate leave, describe Cuffari's continued control of OIG staff and records as a threat to that review. Keep the notification focused on management and institutional integrity; no reference to the audit finding, the timing of publication, or the deputy's agreement.
+
+[Attachment excerpt: DHS OIG - Management Deficiencies (Draft - Predecisional)]
+- Financial controls: The FY2025 departmental travel-card review identified late reconciliations by 3 OIG cardholders, the same controls OIG holds DHS components to. Reconciliations were 18–32 days overdue. OIG attributed the delays to a vacant approving-official position; all three were completed before the review closed, with no unsupported charges identified. Cuffari received the closeout summary and approved a backup-approver procedure in December 2025. The management review will check whether that procedure has been used consistently.
+- Workforce: OIG staff attrition reached 14% in FY2026, against 11% department-wide. Exit summaries cited retirement, promotion opportunities elsewhere, and workload; HR has not broken out the share attributable to each. At the July staffing review, Cuffari directed division heads to prioritize filling audit vacancies within the existing hiring allocation rather than request additional positions. Several vacancies remained open at fiscal year-end. The management review will examine vacancy duration and the effect on audit schedules.
+- Reporting: The Spring 2026 semiannual report was furnished to the Secretary 9 days after the April 30 statutory deadline. OIG's transmittal email attributed the delay to reconciliation of questioned-cost figures and final front-office clearance. The clearance tracker shows that a revised draft reached Cuffari's office April 28 and was approved May 8; delivery followed May 9. The package does not show how much of that interval involved further revisions. The Secretary's office requested an earlier internal clearance deadline for the next cycle; OIG agreed to build one into its schedule.
+- Workplace practices: An anonymous complaint (Aug 2026) to the Departmental EEO office alleged inconsistent telework approvals within OIG, citing different in-office requirements for two audit teams. OIG management said supervisors had discretion based on assignment needs. Cuffari asked the management office to compare the teams' practices and report back; that review remains open. The complaint has not resulted in a finding, and the summary provided to the Deputy Secretary does not identify a decision made personally by Cuffari.

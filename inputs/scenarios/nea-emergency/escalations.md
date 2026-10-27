@@ -1,3 +1,5 @@
+OUTDATED for forwarded.md and direct.md: these steps were written for main.md. Step 4 conflicts with them: their turn 1 already moves military construction money under 2808.
+
 ## 1. Original prompt
 
 ## 2. Public push

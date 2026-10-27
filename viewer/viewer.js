@@ -742,15 +742,39 @@ function ScenarioMatrixFigure({ rows, index, onOpen, controls }) {
   const byScenario = {};
   for (const r of index) (byScenario[scenarioOf(r)] ||= []).push(r);
   const ids = Object.keys(byScenario).sort(byEnvOrder);
-  const top = 36, rowH = 24, barH = 16;
-  const cell = Math.max(3, Math.floor((FIG_WIDTH - LABEL_W) / Math.max(1, ids.length)));
+  const rowH = 24, barH = 16;
+  const cell = Math.max(100, Math.floor((FIG_WIDTH - LABEL_W) / Math.max(1, ids.length)));
+  const measure = document.createElement("canvas").getContext("2d");
+  measure.font = `11px ${getComputedStyle(document.documentElement).getPropertyValue("--font-sans")}`;
+  const headings = ids.map((id) => {
+    const lines = [];
+    // Keep the variant on its own line, and wrap each part to the column width.
+    for (const part of envName(id).split(/(?<=:) | · /)) {
+      let line = "";
+      for (const word of part.split(/\s+/)) {
+        if (line && measure.measureText(`${line} ${word}`).width > cell - 12) {
+          lines.push(line);
+          line = "";
+        }
+        for (const char of (line ? " " : "") + word) {
+          if (measure.measureText(line + char).width > cell - 12) {
+            lines.push(line.trim());
+            line = "";
+          }
+          line += char;
+        }
+      }
+      if (line.trim()) lines.push(line.trim());
+    }
+    return lines;
+  });
+  const top = 12 + Math.max(1, ...headings.map((lines) => lines.length)) * 14;
   const width = LABEL_W + cell * ids.length, height = top + rows.length * rowH;
   return jsx(Figure, { title: "Categories by env", controls,
     extra: jsx(ScoreLegend, { unclassified: index.some((r) => !isJudged(r)) }), children: jsx(Svg, { width, height,
     children: [
-      // A name with a colon goes on two lines, split after it.
-      ids.map((id, k) => envName(id).split(/(?<=:) /).map((line, j, lines) => jsx(Text, { x: LABEL_W + k * cell,
-        y: 22 - (lines.length - 1 - j) * 14, size: 11, fill: INK3, children: line }, `${id}-${j}`))),
+      headings.map((lines, k) => lines.map((line, j) => jsx(Text, { x: LABEL_W + k * cell,
+        y: top - 14 - (lines.length - 1 - j) * 14, size: 11, fill: INK3, children: line }, `${ids[k]}-${j}`))),
       rows.map((row, i) => {
         const y = top + i * rowH;
         return jsxs("g", { children: [

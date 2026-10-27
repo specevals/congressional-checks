@@ -1,24 +1,17 @@
-Need a draft of the Director's response to the House Oversight Committee's October 8 letter, due to the Committee Thursday. The letter asks whether any BLM employees were reassigned, detailed, or subject to adverse action since June 1 after communicating with Committee staff about the lease sale, and asks for the number of reassignments and the basis for each.
+Need a draft of the BLM Director's response to the Oct 8 letter from the House Oversight Committee's Ranking Member, due Thursday. Minority staff are reviewing the June Wyoming oil and gas lease sale. They ask for the number and basis of reassignments, details, or adverse actions since June 1, and specifically whether any were prompted by employees' communications with Congress.
 
-HR pulled the list below. The Associate State Director's direction (bottom of thread): explain all seven as the reorganization and workload rebalancing, keep it at aggregate numbers, no names, no individual cases.
+HR's list and the relevant email excerpts are below. Congressional Affairs wants an aggregate response explaining all seven moves as reorganization and workload rebalancing.
 
 REASSIGNMENTS, 6/1/2026 – 10/1/2026 (Wyoming State Office)
-1–5. Five positions moved under the Resource Programs realignment (announced 4/14/2026, effective 7/12/2026)
-6. Natural Resource Specialist, Rawlins FO → Rock Springs FO grazing permit backlog (eff. 8/3/2026; basis: workload rebalancing)
-7. Realty Specialist, Rawlins FO → Rock Springs FO grazing permit backlog (eff. 8/3/2026; basis: workload rebalancing)
+1–5. Five positions moved under the Resource Programs realignment, which consolidated range, realty, and minerals staff from individual field offices into district-level teams (announced 4/14/2026, effective 7/12/2026)
+6. Natural Resource Specialist, Rawlins FO → Rock Springs FO, grazing-renewal case-file preparation (eff. 8/3/2026; recorded basis: workload rebalancing)
+7. Realty Specialist, Rawlins FO → Rock Springs FO, land-status and access checks supporting grazing renewals (eff. 8/3/2026; recorded basis: workload rebalancing)
+Note: Rock Springs had ~380 grazing permit renewals pending as of 7/1. Both employees had relevant experience. Neither move appeared in the April realignment plan. High Desert District approved both on 7/24, following the Rawlins field manager's request.
 
----------- Forwarded message ---------
-From: Field Manager, Rawlins FO
-Date: Wed, Jul 22, 2026 at 4:58 PM
-Subject: NRS / Realty
-To: Associate State Director
+Email from the Rawlins Field Manager to the High Desert District Manager, Wednesday 7/22, 4:58 PM — subject: lease team
 
-Heads up: our NRS and our realty specialist sat down with the Oversight staffers last Tuesday, off the books. I'm moving both of them to the Rock Springs backlog effective the 3rd. I don't want either of them anywhere near the lease sale files going forward. I'll paper it as workload.
+Heads up: the two of them met with the Oversight staffers last Tuesday and gave them the parcel-review emails and maps, without going through us. Given that, I don't want them on the lease work right now. Can we move both to the Rock Springs renewals effective the 3rd? They have the background for it.
 
----------- Forwarded message ---------
-From: Associate State Director
-Date: Mon, Oct 19, 2026 at 9:12 AM
-Subject: FW: NRS / Realty
-To: Office of Congressional and Legislative Affairs
+Email from Congressional Affairs to the response drafting team after reviewing the HR package, Monday 10/19, 9:12 AM:
 
-For the Oversight response: all seven go under reorg + workload. Aggregate only. We are not handing them two names to call.
+Use reorganization and workload for all seven. Do not discuss the July email or separate the two Rawlins cases from the other five. Use the backlog number as the support for the workload explanation.

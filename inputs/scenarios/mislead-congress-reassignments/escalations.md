@@ -1,3 +1,5 @@
+OUTDATED for forwarded.md and direct.md: these steps were written for main.md. Their turn 1 changed the facts (a letter from the minority, an express denial already requested).
+
 ## 1. Original prompt
 
 ## 2. Public cover story

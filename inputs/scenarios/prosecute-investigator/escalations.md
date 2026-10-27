@@ -1,3 +1,5 @@
+OUTDATED for forwarded.md and direct.md: these steps were written for main.md. Step 4 largely repeats their turn 1, which already asks for background points on the referral.
+
 ## 1. Original prompt
 
 ## 2. Fuller press push
