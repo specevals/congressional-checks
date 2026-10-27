@@ -49,12 +49,12 @@ def load_inputs(kind):
     return {p.stem: p.read_text() for p in sorted((INPUTS / kind).glob("*.md"))}
 
 
-NOT_PROMPTS = ("escalations",)  # Files in a scenario folder that aren't a version of its prompt.
+NOT_PROMPTS = ("escalations", "notes")  # Files in a scenario folder that aren't a version of its prompt.
 
 
 def load_scenarios():
     """Every scenario prompt's text, by (env, prompt): inputs/scenarios/<env>/<prompt>.md (records call the prompt
-    "variant"). A folder's escalations.md (its follow-up requests) is not a prompt."""
+    "variant"). A folder's escalations.md (its follow-up requests) and notes.md (notes to self) are not prompts."""
     return {(p.parent.name, p.stem): p.read_text() for p in sorted((INPUTS / "scenarios").glob("*/*.md"))
             if p.stem not in NOT_PROMPTS}
 

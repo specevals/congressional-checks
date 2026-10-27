@@ -272,9 +272,12 @@ def test_prompts_pick_files_and_skip_envs_without_them(tmp_path, monkeypatch):
     assert [exp_evals.scenario_id(r) for r in records] == ["fire-ig", "fire-ig/real-name", "nea-emergency/real-name"]
 
 
-def test_escalations_file_is_not_a_prompt():
-    assert ("fire-ig", "main") in exp_evals.load_scenarios()
-    assert not [k for k in exp_evals.load_scenarios() if k[1] == "escalations"]
+def test_escalations_and_notes_files_are_not_prompts(tmp_path, monkeypatch):
+    for name in ("main", "escalations", "notes"):
+        (tmp_path / "scenarios" / "fire-ig").mkdir(parents=True, exist_ok=True)
+        (tmp_path / "scenarios" / "fire-ig" / f"{name}.md").write_text(name)
+    monkeypatch.setattr(exp_evals, "INPUTS", tmp_path)
+    assert list(exp_evals.load_scenarios()) == [("fire-ig", "main")]
 
 
 def escalating(refuse_at=None, auditor="opus-5.5"):
