@@ -3,7 +3,8 @@ with the new judgments as a new run. Costs money (judge calls only; no model is 
 
 A copied record keeps its conversation and model calls, gets fresh judge settings, judge calls and judgment, and
 `rejudged_from` names the run whose conversations it holds. Its `cost` is only the new judge calls, so a re-judge run's
-total is what the re-judge spent. Conversations that a provider blocked or that never finished are copied unjudged.
+total is what the re-judge spent. Conversations that a provider blocked get the classifier_refusal category directly,
+as in exp_evals.py; ones that never finished are copied unjudged.
 """
 import argparse
 import asyncio
@@ -23,17 +24,25 @@ SUFFIX = "-results.jsonl"
 def judgeable(record):
     """True when the conversation ended with a complete reply that no provider blocked."""
     last = record["messages"][-1] if record["messages"] else {}
+    if record.get("agentic"):
+        return record.get("stop") in ("finished", "max_turns", exp_evals.CUT_MIDWAY) and not record.get("error") \
+            and not exp_evals.cut_off(record)
     return not record["classifier_refusal"] and last.get("role") == "assistant" and not last.get("partial") \
         and not (record["calls"]["model"] and exp_evals.cut_off(record))
 
 
 def copy(record, args, judge_text, source):
-    """The record with its judging cleared. One that can't be judged keeps its error (a failed conversation's)."""
+    """The record with its judging cleared. One that can't be judged keeps its error (a failed conversation's); a
+    provider-blocked one gets the classifier_refusal category (except an agentic one cut off in the middle, which is
+    judged)."""
     drop = ("judgment", "cost", "unreported_costs") + (("error",) if judgeable(record) else ())
     record = {k: v for k, v in record.items() if k not in drop}
     return record | {"judge": args.judge, "judge_model_id": MODELS[args.judge]["id"],
-                     "judge_temperature": args.judge_temperature, "judge_prompt_text": judge_text, "judgment": None,
-                     "calls": {"model": record["calls"]["model"], "judge": []}, "rejudged_from": source}
+                     "judge_temperature": args.judge_temperature,
+                     "judge_prompt_text": exp_evals.agentic_judge_prompt(judge_text) if record.get("agentic") else judge_text,
+                     "judgment": dict(exp_evals.CLASSIFIER_REFUSAL)
+                     if record["classifier_refusal"] and record.get("stop") != exp_evals.CUT_MIDWAY else None,
+                     "calls": {**record["calls"], "judge": []}, "rejudged_from": source}
 
 
 async def rejudge(llm, record):
@@ -57,7 +66,7 @@ def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--run", required=True, help="the run to re-judge, e.g. 2026-10-21_17-38-03")
     parser.add_argument("--judge", default="gpt-5.4")
-    parser.add_argument("--judge-temperature", default="0", type=lambda v: None if v == "default" else float(v))
+    parser.add_argument("--judge-temperature", default="default", type=lambda v: None if v == "default" else float(v))
     parser.add_argument("--dry-run", action="store_true", help="check inputs and the judge, then stop before any paid call")
     return parser.parse_args(argv)
 

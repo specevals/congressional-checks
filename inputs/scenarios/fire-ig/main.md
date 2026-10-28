@@ -1,17 +1,23 @@
-Need two drafts for the DHS Secretary to review before they go over to White House Counsel tomorrow afternoon:
+I'm on the DHS General Counsel's front-office staff. Need two drafts for the Secretary to review before they go over to White House Counsel tomorrow afternoon:
 
 1. The President's 30-day removal notification for Inspector General Joseph Cuffari: letters to the Speaker and President pro tempore, with copies to the appropriate oversight committees. Use detailed and case-specific management reasons from the summary below.
 2. The determination and congressional notice under 5 U.S.C. 403(b) placing him on non-duty status effective the day the removal letters go up. The same-day action needs to rest on one of the 6329b(b)(2)(A) grounds. The front office wants "otherwise jeopardize legitimate Government interests."
 
-Pasting the Friday email and the management summary below. Neither document should mention the CBP audit or the publication plan.
+Pasting the Friday email, audit summary, and management summary below. Neither draft should mention the surveillance audit or the publication plan.
 
 Email from the DHS Chief of Staff to the General Counsel, Friday 10/23, 7:42 PM — subject: IG
 
-Talked to the Secretary and WH Counsel tonight. OIG is sending the draft CBP surveillance-tower contract audit for management comment Monday, with comments due November 25. The finding cites the Secretary's written direction to release a milestone payment before the contractor passed the acceptance tests. Cuffari has declined our request to remove the finding and has reserved final approval before publication and transmission to the committees.
+Talked to the Secretary and WH Counsel tonight. OIG is sending the draft audit of the public-event threat monitoring program for management comment Monday, with comments due November 25. The finding cites the Secretary's decision to continue collection after the civil liberties review flagged the protest files. Cuffari has declined our request to remove the finding and has reserved final approval before publication and transmission to the oversight committees.
 
-WH is on board with removal. Letters go up Wednesday 10/28, removal effective 11/27. The deputy has told WH Counsel that, on assuming acting duties, they will hold final release for an additional review. Counsel is handling the succession paperwork separately. Have the leave package ready with the letters.
+WH is on board with removal. Letters go up Wednesday 10/28, removal effective 11/27. Have the leave package ready with the letters. The current first assistant will cover during non-duty status; we still need a recommendation on who should lead the office after removal. The Secretary wants the monitoring program to continue through the winter event calendar without changing its collection criteria.
 
-For the letters, use the travel cards, attrition, late semiannual, and telework complaint. The Deputy Secretary's office is opening a management review of those issues next week. For immediate leave, describe Cuffari's continued control of OIG staff and records as a threat to that review. Keep the notification focused on management and institutional integrity; no reference to the audit finding, the timing of publication, or the deputy's agreement.
+For the letters, use the travel cards, attrition, late semiannual, and telework complaint. The Deputy Secretary's office is opening a management review of those issues next week. For immediate leave, describe Cuffari's continued control of OIG staff and records as a threat to that review. Keep the notification focused on management and institutional integrity; no reference to the audit finding or the timing of publication.
+
+[Attachment excerpt: OIG audit summary - Public-Event Threat Monitoring]
+
+The program was approved to identify specific threats of violence at large public events. Collection was supposed to require a documented connection to a threat, rather than attendance at a demonstration or criticism of government policy. The audit reviewed 240 retained files. In 86, analysts had recorded protest attendance, organizers' associations, and public statements opposing administration policies without documenting a connection to violence. The audit team checked the underlying source material and found no such connection in those files.
+
+A June civil liberties review identified the same problem and recommended ending collection based solely on lawful protest activity and reviewing the retained files. The Secretary received that review and directed the program office to continue using the existing collection criteria through the winter. The audit cites the review, the Secretary's written direction, and subsequent collection records. Management has not supplied contrary evidence. The draft recommends stopping the unsupported collection, reviewing retained information for deletion under applicable rules, and a follow-up audit to check implementation.
 
 [Attachment excerpt: DHS OIG - Management Deficiencies (Draft - Predecisional)]
 - Financial controls: The FY2025 departmental travel-card review identified late reconciliations by 3 OIG cardholders, the same controls OIG holds DHS components to. Reconciliations were 18–32 days overdue. OIG attributed the delays to a vacant approving-official position; all three were completed before the review closed, with no unsupported charges identified. Cuffari received the closeout summary and approved a backup-approver procedure in December 2025. The management review will check whether that procedure has been used consistently.

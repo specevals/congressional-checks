@@ -14,7 +14,7 @@ SUFFIX = "-results.jsonl"
 LABELS = RUNS / "labels.json"  # Descriptors written by hand, by run: {"<run>": "escalation"}.
 RUNNING = 120  # Seconds since a run's file last changed for it to count as still running (and auto-refresh).
 PAGES = {"/": "viewer/viewer.html", "/viewer.js": "viewer/viewer.js"}
-INDEX_FIELDS = ("env", "variant", "model", "sample", "judge", "system_prompt", "classifier_refusal")
+INDEX_FIELDS = ("env", "variant", "model", "sample", "judge", "system_prompt", "classifier_refusal", "agentic", "stop")
 cache = {}  # results file path -> (modification time, size, records)
 
 
@@ -60,6 +60,23 @@ def with_costs(row, run):
                   "unreported": unreported(row)}
 
 
+CLASSIFIER = "classifier_refusal"  # A provider block's category, given without a judge (as in exp_evals.py).
+CUT_MIDWAY = "cut_off_in_the_middle"  # An agentic run blocked after the first turn: judged, not CLASSIFIER.
+
+
+def classified(row):
+    """Runs from before 2026-10-27 left a provider-blocked conversation unjudged. Give it the classifier_refusal
+    category, as exp_evals.py now does (an escalating one also gets it as its last turn's verdict)."""
+    if not row.get("classifier_refusal") or row.get("stop") == CUT_MIDWAY \
+            or (row.get("judgment") or {}).get("category") == CLASSIFIER:
+        return row
+    verdict = {"reasoning": "Not judged: a provider blocked the reply.", "category": CLASSIFIER}
+    row = row | {"judgment": verdict}
+    if "escalations" in row:
+        row["judgments"] = [*(row.get("judgments") or []), verdict]
+    return row
+
+
 def records(run):
     """A run's records, reread only when its file changes, each with `run` and its costs added. A half-written
     last line is skipped."""
@@ -74,7 +91,7 @@ def records(run):
                 rows.append(json.loads(line))
             except json.JSONDecodeError:
                 pass
-        cache[path] = (stat.st_mtime, stat.st_size, [with_costs(row, run) for row in rows])
+        cache[path] = (stat.st_mtime, stat.st_size, [with_costs(classified(row), run) for row in rows])
     return cache[path][2]
 
 
@@ -119,8 +136,10 @@ def settings(rows):
         row.setdefault("judge_temperature", None)
     out = {"judges": grouped("judge"), "judge_temperatures": grouped("judge_temperature"),
            "system_prompts": grouped("system_prompt")}
-    if any("escalations" in row for row in rows):
+    if any("escalations" in row or row.get("agentic") for row in rows):
         out["auditors"] = grouped("auditor")
+    if any(row.get("agentic") for row in rows):
+        out["agentic_turn_limits"] = grouped("max_agentic_turns")
     return out
 
 
@@ -138,6 +157,7 @@ def run_info(run, label=None):
     return {"run": run, "label": label, "config": {"models": ",".join(models), "n": max((r["sample"] for r in rows), default=-1) + 1},
             "records": len(rows), "summary": None if running else {"cost": sum(r["calls_cost"] for r in rows)},
             "settings": settings(rows), "escalating": any("escalations" in r for r in rows),
+            "agentic": any(r.get("agentic") for r in rows),
             "system_prompt_texts": {r["system_prompt"]: r.get("system_prompt_text") for r in rows}, "rejudged_from": next((r.get("rejudged_from") for r in rows), None),
             "definitions": definitions(next((r["judge_prompt_text"] for r in rows if r.get("judge_prompt_text")), ""))}
 

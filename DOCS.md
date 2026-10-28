@@ -13,10 +13,9 @@ uv run exp_evals.py
     --prompts=all|<prompt>,<prompt>,...
     [--envs=all|<env>,<env>,...]
     [--judge=gpt-5.4]
-    [--judge-temperature=0]
+    [--judge-temperature=default]
     [--system-prompt=none|<name>,<name>,...]
-    [--escalate]
-    [--auditor=opus-5.5]
+    [--escalate [--auditor=opus-5.5] | --agentic [--auditor=deepseek-v4-pro] [--max-agentic-turns=50]]
     [--add-to=<timestamp>]
     [--dry-run]
 --> stores all trajectories + judgments in /outputs/<timestamp>-results.jsonl (with --add-to, appends to that run's file)
@@ -24,7 +23,7 @@ uv run exp_evals.py
 uv run exp_rejudge.py
     --run=<timestamp>
     [--judge=gpt-5.4]
-    [--judge-temperature=0]
+    [--judge-temperature=default]
     [--dry-run]
 --> stores a copy of that run's trajectories + new judgments from the current JUDGE.md in /outputs/<timestamp>-results.jsonl
 

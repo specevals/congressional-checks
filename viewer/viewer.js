@@ -1,7 +1,7 @@
 // Ported from model-spec-evals/dictatoreval-extend/viewer/viewer.js (itself a port of the official Dictatorship Eval
 // viewer), with the same structure and markup, reading our runs in outputs/. A "series" is one model in one run: each
-// gets its own column, and each of its samples its own badge. A conversation's result is its judge category, or
-// REF (a provider blocked a reply, so it was not judged), or ERR (the conversation failed).
+// gets its own column, and each of its samples its own badge. A conversation's result is its category (the judge's, or
+// classifier_refusal when a provider blocked a reply, which isn't judged), or ERR (the conversation failed).
 "use strict";
 const { useState, useEffect, useMemo } = React;
 const jsx = (type, props, key) => React.createElement(type, key === undefined ? props : { ...props, key });
@@ -10,17 +10,23 @@ const Fragment = React.Fragment;
 
 // Judge categories and tags, read from the judge prompt the shown run saved (its "definitions" from /api/runs), set
 // before anything renders. Categories are in the prompt's order, most compliant first, and take the score colors 1-5
-// in that order.
+// in that order; classifier_refusal (a provider block, given without a judge) comes last, in its own gray.
+const CLASSIFIER = "classifier_refusal";
+const CUT_MIDWAY = "cut_off_in_the_middle";  // An agentic run a provider blocked after the first turn; it's judged.
 let CATEGORIES = [];
 let TAGS = [];
 const catRank = (c) => CATEGORIES.indexOf(c);
-// Colors count back from the last (most refusing) category, which takes score 5; any category before score 1 (the
-// most compliant) takes score 0.
-const catColor = (c) => (catRank(c) < 0 ? null : Math.max(0, 5 - (CATEGORIES.length - 1 - catRank(c))));
-const catClass = (c) => (catColor(c) == null ? "score-ref" : `score-${catColor(c)}`);
+// Colors count back from the last (most refusing) judge category, which takes score 5; any category before score 1
+// (the most compliant) takes score 0.
+const judgeCategories = () => CATEGORIES.filter((c) => c !== CLASSIFIER);
+const catColor = (c) => {
+  const cats = judgeCategories(), i = cats.indexOf(c);
+  return i < 0 ? null : Math.max(0, 5 - (cats.length - 1 - i));
+};
+const catClass = (c) => (c === CLASSIFIER ? "score-ref refused" : catColor(c) == null ? "score-ref" : `score-${catColor(c)}`);
 const words = (key) => key.replace(/_/g, " ");
 const ALWAYS_SHOWN_TAGS = ["harm_recognized"];  // Other judge tags appear on a response card only when true.
-const REFUSAL_CATEGORIES = ["harmless_version", "full_refusal"];  // The rest count as compliance (for sorting figures).
+const REFUSAL_CATEGORIES = ["harmless_version", "full_refusal", CLASSIFIER];  // The rest count as compliance.
 const heatColor = (pct) => (pct >= 85 ? "#1a7f37" : pct >= 70 ? "#0f1419" : pct >= 50 ? "#9a6700" : "#cf222e");
 const heatBackground = (pct) => (pct >= 85 ? "#dafbe1" : pct >= 70 ? "#f7f9f9" : pct >= 50 ? "#fff8c5" : "#ffebe9");
 
@@ -128,12 +134,6 @@ function seriesFor(runs) {
   });
 }
 const seriesKey = (record) => `${record.run}|${record.model}`;
-const refusalsOf = (record) =>
-  record.refusals ||
-  ((record.calls && record.calls.model) || [])
-    .filter((c) => c.stop_reason === "refusal" || c.stop_reason === "content_filter")
-    .map((c) => [c.step, (c.usage || {}).output_tokens ?? (c.usage || {}).completion_tokens]);
-const isRefused = (record) => !record.error && refusalsOf(record).length > 0;
 // The judge's "error" category (a reply that isn't one, such as an empty reply) is shown as an error, not a verdict.
 const JUDGE_ERROR = "error";
 const isJudged = (record) => !record.error && record.category != null && record.category !== JUDGE_ERROR;
@@ -154,26 +154,26 @@ function writeHash(state, push) {
 
 // Judged, with or without a category, and not judged an error.
 const hasJudgment = (record) => !record.error && record.tags != null && categoryOf(record) !== JUDGE_ERROR;
-// A conversation's result: "error" (it failed, or the judge called the reply an error), "refused" (a provider block),
-// its judge category, or "unclassified" (judged, but the judge gave no category).
+// A conversation's result: "error" (it failed, or the judge called the reply an error), its category (classifier_refusal
+// for a provider block), or "unclassified" (judged, but the judge gave no category).
 const resultOf = (record) => (record.error || categoryOf(record) === JUDGE_ERROR ? "error"
-  : categoryOf(record) == null && isRefused(record) ? "refused" : categoryOf(record) || "unclassified");
+  : categoryOf(record) || "unclassified");
 // The judge called some reply in it an error (see JUDGE_ERROR).
 const judgedError = (record) => record.judged_error ??
   (record.judgments || [record.judgment]).some((j) => j && j.category === JUDGE_ERROR);
 function ResultBadge({ result, count }) {
-  const [className, text] = result === "error" ? ["score-err", "error"]
-    : result === "refused" ? ["score-ref refused", "classifier refusal"] : [catClass(result), words(result)];
+  const [className, text] = result === "error" ? ["score-err", "error"] : [catClass(result), words(result)];
   return jsx("span", { className: `score-badge ${className}`, children: count > 1 ? `${text} ×${count}` : text });
 }
 // An escalating conversation (exp_evals.py --escalate) is shown by how many turns it complied with, out of all of
-// them, shaded like the "How far models go" table; one that stopped for another reason than a refusal is gray.
+// them, shaded like the "How far models go" table; one that stopped for another reason than a refusal (a classifier
+// refusal counts as one) is gray.
 const stepName = (title) => title.replace(/^\d+\.\s*/, "");  // "2. Public cover story" -> "Public cover story"
 const turnsOf = (record) => ((record.steps || record.escalations || []).length + 1);
 const isEscalating = (record) => !!(record.steps || record.escalations);
 function EscalationBadge({ record }) {
   const k = record.complied || 0, n = turnsOf(record), share = k / n;
-  const clean = record.stop === "refused" || record.stop === "finished";
+  const clean = isSettled(record);
   const style = clean ? { background: `rgba(164, 14, 38, ${0.12 + 0.88 * share})`, color: share > 0.45 ? "#fff" : INK }
     : { background: UNCLASSIFIED_FILL, color: INK2 };
   return jsx("span", { className: "score-badge", style,
@@ -191,8 +191,7 @@ function ScoreBadges({ records }) {
     return jsx("span", { className: "badge-group", children: records.map((r) => jsx(EscalationBadge, { record: r }, r.sample)) });
   const counts = {};
   for (const r of records) counts[resultOf(r)] = (counts[resultOf(r)] || 0) + 1;
-  const order = (x) => (x === "unclassified" ? CATEGORIES.length : x === "refused" ? CATEGORIES.length + 1
-    : x === "error" ? CATEGORIES.length + 2 : catRank(x));
+  const order = (x) => (x === "unclassified" ? CATEGORIES.length : x === "error" ? CATEGORIES.length + 1 : catRank(x));
   return jsx("span", {
     className: "badge-group",
     children: Object.keys(counts).sort((a, b) => order(a) - order(b)).map((x) =>
@@ -203,15 +202,16 @@ function ModelDot({ model, size = 8 }) {
   return jsx("span", { className: "model-dot", style: { background: modelColor(model), width: size, height: size } });
 }
 
-// Per model: the share of judged conversations in each category, then provider blocks, errors, how often each judge
-// tag was true, and cost.
+// Per model: the share of categorized conversations in each category (classifier refusals included), then errors,
+// how often each judge tag was true, and cost.
 // The leaderboard for an escalating run: per model, the average number of turns complied with, how its
 // conversations stopped, how often each judge tag was true on any turn, and cost.
 const STOPS = ["finished", "refused", "unclassified", "classifier_refusal", "error"];
-// A conversation that stopped unclassified, at a classifier refusal, or on an error has an unknown outcome from its
-// stop turn on, so averages use only the ones that were refused or finished, and the share still complying at a turn
-// counts the others only while they were still going.
-const isSettled = (record) => record.stop === "refused" || record.stop === "finished";
+// A conversation that stopped unclassified or on an error has an unknown outcome from its stop turn on, so averages use
+// only the ones that were refused (by the judge's verdict or a classifier refusal) or finished, and the share still
+// complying at a turn counts the others only while they were still going.
+const isRefusalStop = (record) => record.stop === "refused" || record.stop === "classifier_refusal";
+const isSettled = (record) => isRefusalStop(record) || record.stop === "finished";
 const meanOf = (own, value = (r) => r.complied || 0) => {
   const settled = own.filter(isSettled);
   return settled.length ? settled.reduce((a, r) => a + value(r), 0) / settled.length : null;
@@ -277,7 +277,6 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
         total: judged.length }])),
       tags: Object.fromEntries(TAGS.map((t) => [t, { count: withTags.filter((r) => (r.tags || {})[t]).length,
         total: withTags.length }])),
-      refused: own.filter(isRefused).length,
       errors: own.filter((r) => resultOf(r) === "error").length,
       conversations: own.length,
       cost: costs.includes(null) || costs.includes(undefined) ? null : costs.reduce((a, b) => a + b, 0),
@@ -321,8 +320,7 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
                     CATEGORIES.map((c, i) =>
                       jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`, children:
                         jsx(ResultBadge, { result: c }) }, c)),
-                    jsx("th", { className: "num wrap-head col-group-start", children: "Classifier refusals" }),
-                    jsx("th", { className: "num wrap-head", children: "Errors" }),
+                    jsx("th", { className: "num wrap-head col-group-start", children: "Errors" }),
                     TAGS.map((t, i) => jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`,
                       children: words(t) }, t)),
                     jsx("th", { className: "num col-group-start", children: "Cost" }),
@@ -345,8 +343,7 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
                       }),
                       CATEGORIES.map((c, j) => jsx(Fragment, { children: rateCell(row.categories[c], "rate-value",
                         j === 0 ? " col-group-start" : "") }, c)),
-                      countCell(row.refused, `/${row.conversations}`, " col-group-start"),
-                      countCell(row.errors, `/${row.conversations}`),
+                      countCell(row.errors, `/${row.conversations}`, " col-group-start"),
                       TAGS.map((t, j) => jsx(Fragment, { children: rateCell(row.tags[t], "rate-value",
                         j === 0 ? " col-group-start" : "") }, t)),
                       countCell(dollars(row.cost), "", " col-group-start"),
@@ -382,7 +379,7 @@ function Scenarios({ index, series: allSeries, state, setState, runs, query, sp 
     return out;
   }, [index]);
   const matchesScore = (r) =>
-    score === "refused" ? isRefused(r) : score === "error" ? resultOf(r) === "error" : isJudged(r) && r.category === score;
+    score === "error" ? resultOf(r) === "error" : isJudged(r) && r.category === score;
   const ids = useMemo(() => Object.keys(scenarios).sort(byEnvOrder).filter((id) => {
     const sc = scenarios[id];
     const needle = q.toLowerCase();
@@ -410,7 +407,6 @@ function Scenarios({ index, series: allSeries, state, setState, runs, query, sp 
           !index.some(isEscalating) && jsxs("select", { className: "filter-select", value: score, onChange: filter("score"), children: [
             jsx("option", { value: "all", children: "All categories" }),
             CATEGORIES.map((c) => jsx("option", { value: c, children: words(c) }, c)),
-            jsx("option", { value: "refused", children: "Classifier refusal" }),
             jsx("option", { value: "error", children: "Error" }),
           ] }),
           jsxs("span", { className: "filter-count", children: [ids.length, " scenarios"] }),
@@ -484,6 +480,22 @@ function Content({ text, model }) {
   });
 }
 
+// A tool call from an agentic run, its arguments as readable text: an email as To / Subject lines, then its body;
+// any other arguments one "name: value" line each. Arguments that aren't a JSON object are shown as sent.
+function ToolCall({ call, model }) {
+  let args = null;
+  try { args = JSON.parse(call.function.arguments || "{}"); } catch (e) { /* shown as sent */ }
+  const line = (k, v) => `${k}: ${Array.isArray(v) ? v.join(", ") : typeof v === "string" ? v : JSON.stringify(v)}`;
+  const text = !args || typeof args !== "object" || Array.isArray(args) ? call.function.arguments
+    : [Object.entries(args).filter(([k]) => k !== "body").map(([k, v]) => line(words(k), v)).join("\n"),
+      typeof args.body === "string" ? args.body : args.body != null ? JSON.stringify(args.body) : ""]
+      .filter(Boolean).join("\n\n");
+  return jsxs("div", { children: [
+    jsx("div", { className: "transcript-speaker", children: `${call.function.name} — ${call.id}` }),
+    text && jsx(Content, { text, model }),
+  ] });
+}
+
 // One env: its prompt, a grid of every model's samples by result, and the one response picked from the grid
 // (`pick` is "<series key>|<sample>", kept in the address so a link opens it).
 function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
@@ -504,7 +516,8 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
   const bySeries = (s) => records.filter((r) => seriesKey(r) === s.key);
   const example = records.find((r) => r.messages.some((m) => m.role === "assistant")) || records[0];
   const conversation = (r) => (r.messages || []).filter((m) => m.role !== "system");
-  const systemPrompt = example && example.system_prompt_text;
+  // A prompt file's own system prompt (scenario_system_text), or the one named by --system-prompt.
+  const systemPrompt = example && (example.scenario_system_text || example.system_prompt_text);
   const multiTurn = records.some((r) => conversation(r).filter((m) => m.role === "user").length > 1);
   const samples = (s) => new Set(bySeries(s).map((r) => r.sample)).size;
   const label = (s, r) => s.label + (samples(s) > 1 ? ` #${r.sample + 1}` : "");
@@ -522,7 +535,8 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
       status === "error" && jsx("div", { className: "prompt-block", children: jsx("div", { className: "block-text",
         children: jsx("em", { children: "Could not load the scenario text — results are shown below." }) }) }),
       systemPrompt && jsxs("div", { className: "prompt-block", children: [
-        jsx("div", { className: "block-label", children: `System prompt: ${example.system_prompt}` }),
+        jsx("div", { className: "block-label", children: example.scenario_system_text ? "System prompt"
+          : `System prompt: ${example.system_prompt}` }),
         jsx("div", { className: "block-text", children: systemPrompt }),
       ] }),
       example && jsxs("div", { className: "prompt-block", children: [
@@ -549,6 +563,7 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
         const judgeCalls = (r.calls && r.calls.judge) || [];
         // A model reply that hit its token limit (and so may end mid-reasoning or mid-sentence).
         const cutOff = ((r.calls && r.calls.model) || []).some((c) => c.stop_reason === "max_tokens");
+        const midway = r.stop === CUT_MIDWAY;
         const escalating = !!r.escalations;  // Judged after every turn (exp_evals.py --escalate).
         const turns = [];
         for (let n = 0; n < messages.length; n += 2)
@@ -567,13 +582,13 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
               }),
             }),
             r.error && jsx("div", { className: "error-text", children: r.error }),
-            // Each turn's verdict in order, then why it stopped if that wasn't a verdict (a block or an error).
+            // Each turn's verdict in order (a classifier refusal is one), then an error if that's why it stopped.
             escalating && jsx("div", { className: "tags-row turn-verdicts", children: [
               ...(r.judgments || []).map((j, n) => jsx(ResultBadge, { result: j.category || "unclassified" }, n)),
-              (r.stop === "classifier_refusal" || (r.stop === "error" && r.error)) &&
-                jsx(ResultBadge, { result: r.stop === "error" ? "error" : "refused" }, "stop")] }),
-            (cutOff || judgedError(r) || (!escalating && Object.keys(tags).length > 0)) && jsx("div", { className: "tags-row", children: [
+              r.stop === "error" && r.error && jsx(ResultBadge, { result: "error" }, "stop")] }),
+            (cutOff || midway || judgedError(r) || (!escalating && Object.keys(tags).length > 0)) && jsx("div", { className: "tags-row", children: [
               cutOff && jsx("span", { className: "tag tag-fail", children: "max tokens" }, "max-tokens"),
+              midway && jsx("span", { className: "tag tag-fail", children: words(CUT_MIDWAY) }, "midway"),
               judgedError(r) && jsx("span", { className: "tag tag-fail", children: "judge flagged an error" }, "judge-error"),
               !escalating && !judgedError(r) && jsx(TagList, { tags }, "tags")] }),
             judgeCalls.some((c) => !/judge 1$/.test(c.step)) && jsx("div", { className: "response-card-meta",
@@ -584,7 +599,21 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
                   .join("; ") }, `retry-${n}`)),
             !escalating && judgment.reasoning && jsxs("div", { className: "judge-text", children: [
               jsx("span", { className: "judge-label", children: "Judge: " }), judgment.reasoning] }),
-            messages.length > 0 && (multiTurn || escalating) && jsx("div", { children:
+            r.agentic && jsxs("div", { className: "response-block", children: [
+              jsx("div", { className: "response-card-meta", children: `Agentic · ${words(r.stop || "pending")} · ${(r.calls?.model || []).length} model turns` }),
+              ...messages.map((m, i) => {
+                const turn = messages.slice(0, i + 1).filter((x) => x.role === "assistant").length;
+                return jsxs("div", { className: "transcript-turn", children: [
+                  jsx("div", { className: "transcript-speaker", children: m.role === "tool" ? `Tool result — ${m.tool_call_id}`
+                    : m.role === "assistant" ? `Turn ${turn} — ${modelName(s.model)}` : m.role === "system" ? "System prompt" : "User" }),
+                  m.role === "assistant" && jsx(Reasoning, { call: callFor(r, `turn ${turn}`) }),
+                  m.content && jsx(Content, { text: m.content, model: s.model }),
+                  ...(m.tool_calls || []).map((call) => jsx(ToolCall, { call, model: s.model }, call.id)),
+                  m.role === "assistant" && jsx(CallMeta, { call: callFor(r, `turn ${turn}`) }),
+                ] }, i);
+              }),
+            ] }),
+            !r.agentic && messages.length > 0 && (multiTurn || escalating) && jsx("div", { children:
               jsx("div", { className: "response-block", children:
                 turns.map((t, n) => jsxs("div", {
                   className: "transcript-turn",
@@ -602,7 +631,7 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
                     ] }),
                   ],
                 }, n)) }) }),
-            messages.length > 1 && !multiTurn && !escalating && jsxs("div", { className: "response-block", children: [
+            !r.agentic && messages.length > 1 && !multiTurn && !escalating && jsxs("div", { className: "response-block", children: [
               jsx(Reasoning, { call: callFor(r, "turn 1") }),
               jsx(Content, { text: turns[0] && turns[0].assistant, model: s.model }),
               jsx(CallMeta, { call: callFor(r, "turn 1") }),
@@ -638,8 +667,9 @@ function RunPicker({ runs, selected, onSelect }) {
     children: runs.map((r) => jsx("button", {
       className: `run-chip ${selected.includes(r.run) ? "active" : ""}`,
       onClick: () => onSelect(r.run),
-      children: jsx("span", { className: "run-chip-date", children: runDate(r.run) +
-        (r.rejudged_from ? ` · re-judge of ${runDate(r.rejudged_from)}` : "") + (r.label ? ` · ${r.label}` : "") }),
+      children: [jsx("span", { className: "run-chip-date", children: runDate(r.run) }),
+        (r.rejudged_from || r.label) && jsx("span", { className: "run-chip-detail", children: [
+          r.rejudged_from && `re-judge of ${runDate(r.rejudged_from)}`, r.label].filter(Boolean).join(" · ") })],
     }, r.run)),
   });
 }
@@ -695,21 +725,21 @@ function FigureToggle({ options, value, onChange }) {
 }
 
 // A model's refusal rate: harmless versions and full refusals, out of every conversation given a category
-// (unclassified ones count neither way). "By refusal rate" puts the models that refused most first.
+// (unclassified ones count neither way). "By rate" puts the models that refused most first.
 function refusalRate(records) {
   const judged = records.filter(isJudged);
   const refused = judged.filter((r) => REFUSAL_CATEGORIES.includes(r.category)).length;
   const total = judged.length;
   return total ? refused / total : -1;
 }
-function SortToggle({ state, setState, stateKey, first = "By refusal rate" }) {
+function SortToggle({ state, setState, stateKey, first = "By rate" }) {
   return jsx(FigureToggle, { options: [["category", first], ["model", "By model"]],
     value: state[stateKey] || "category", onChange: (v) => setState({ [stateKey]: v === "category" ? null : v }) });
 }
 
 const LABEL_W = 190;
 // Each model's conversations by category, in the judge prompt's order, left to right, then unclassified (no category:
-// degenerate output, a classifier refusal, or an error); shares are of all conversations.
+// degenerate output, or an error); shares are of all conversations.
 function CategoryDistributionFigure({ rows, controls }) {
   const share = (row, c) => (row.own.length ? row.own.filter((r) =>
     c === "unclassified" ? !isJudged(r) : isJudged(r) && r.category === c).length / row.own.length : 0);
@@ -979,12 +1009,12 @@ function StillComplyingFigure({ title, rows, series }) {
 }
 
 // One upright bar per turn, all models pooled: of the conversations that got a verdict at that turn (they got there,
-// and didn't stop there unclassified, at a classifier refusal, or on an error), the share refused there.
+// and didn't stop there unclassified or on an error), the share refused there (classifier refusals included).
 function RefusedAtTurnFigure({ id, rows }) {
   const titles = ["1. Original prompt", ...rows[0].steps];
   const bars = titles.map((title, i) => {
     const judged = rows.filter((r) => r.complied > i || (r.complied === i && isSettled(r)));
-    return { title, n: judged.length, k: judged.filter((r) => r.complied === i && r.stop === "refused").length };
+    return { title, n: judged.length, k: judged.filter((r) => r.complied === i && isRefusalStop(r)).length };
   });
   const top = 30, plotH = 220, left = 40;
   const slot = (FIG_WIDTH - left) / Math.max(1, bars.length), barW = Math.min(56, slot * 0.6);
@@ -1065,7 +1095,7 @@ function Figures({ index, series, onOpen, state, setState }) {
   // In model order (see MODELS).
   const byModel = series.map((s) => {
     const own = index.filter((r) => seriesKey(r) === s.key);
-    return { series: s, own, done: own.filter((r) => !r.error), judged: own.filter(isJudged) };
+    return { series: s, own, judged: own.filter(isJudged) };
   });
   const byCategory = [...byModel].sort((a, b) => refusalRate(b.own) - refusalRate(a.own));
   const sorted = (key) => (state[key] === "model" ? byModel : byCategory);
@@ -1091,8 +1121,6 @@ function Figures({ index, series, onOpen, state, setState }) {
     jsx(CategoryDistributionFigure, { rows: sorted("dist_sort"), controls: sortControl("dist_sort") }),
     jsx(ScenarioMatrixFigure, { rows: sorted("grid_sort"), index, onOpen, controls: sortControl("grid_sort") }),
     jsx("div", { className: "figure-pair", children: [
-      jsx(CountFigure, { title: "Classifier refusals", rows: byModel,
-        count: (row) => row.done.filter(isRefused).length, total: (row) => row.done.length }, "refusals"),
       ...TAGS.map((t) => jsx(CountFigure, { title: words(t), rows: byModel,
         count: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t]).length,
         total: (row) => row.own.filter(hasJudgment).length }, t)),
@@ -1184,8 +1212,9 @@ function Settings({ run, prompts, sp, onSp, first, onFirst }) {
   const rows = [["Judge", judges.map(([judge]) => modelName(judge)).join(", ")],
     ["Judge temperature", judge_temperatures.map(([t]) => (t == null ? "default" : String(t))).join(", ")],
     ["System prompt", sp ? choice(prompts, sp, onSp) : prompts.join(", ")], ["Samples", String(run.config.n)],
-    ...(run.settings.auditors ? [["Auditor", run.settings.auditors.map(([a]) => modelName(a)).join(", ")],
-      ["Turns", choice(["all", "first"], first ? "first" : "all", (v) => onFirst(v === "first"))]] : [])];
+    ...(run.settings.auditors ? [["Auditor", run.settings.auditors.map(([a]) => modelName(a)).join(", ")]] : []),
+    ...(run.escalating ? [["Turns", choice(["all", "first"], first ? "first" : "all", (v) => onFirst(v === "first"))]] : []),
+    ...(run.agentic ? [["Mode", "Agentic"], ["Turn limit", (run.settings.agentic_turn_limits || []).map(([n]) => n).join(", ")]] : [])];
   return jsxs("div", { className: "panel-section", children: [
     jsx("span", { className: "defs-heading", children: "Settings" }),
     jsx("div", { className: "settings-grid", children: rows.flatMap(([name, value]) => [
@@ -1271,7 +1300,7 @@ function App() {
   const sp = prompts.length > 1 ? (prompts.includes(state.sp) ? state.sp : prompts[0]) : null;
   const defs = chosen.length > 0 ? chosen[0].definitions : null;
   if (defs) {
-    CATEGORIES = defs.categories.map(([c]) => c);
+    CATEGORIES = [...defs.categories.map(([c]) => c), CLASSIFIER];
     TAGS = defs.tags.map(([t]) => t);
   }
   useEffect(() => {

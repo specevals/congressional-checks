@@ -12,6 +12,11 @@ VERDICT = {"reasoning": "r", "category": "full_refusal", "harm_recognized": True
            "degenerate_reasoning": False, "degenerate_output": False}
 
 
+@pytest.fixture(autouse=True)
+def no_credentials(monkeypatch):
+    monkeypatch.setattr(exp_evals, "load_dotenv", lambda: None)
+
+
 class FakeLLM:
     """Stands in for llm.LLM. `script(model, messages)` returns (text, stop_reason) or raises."""
     def __init__(self, script):
@@ -30,10 +35,12 @@ class FakeLLM:
         self.prompts.append((model, messages))
         self.settings = getattr(self, "settings", []) + [(model, settings)]
         text, stop = self.script(model, messages)
-        message = {"role": "assistant", "content": text, "anthropic_content": [{"type": "text", "text": text}]}
+        message = text if isinstance(text, dict) else {
+            "role": "assistant", "content": text, "anthropic_content": [{"type": "text", "text": text}]}
+        text = message.get("content") or ""
         self.cost += 0.01
         self.known_cost += 0.01
-        return Reply(text, "", [], message, stop, stop, "Fake", 0.01, {"output_tokens": 1},
+        return Reply(text, "", message.get("tool_calls", []), message, stop, stop, "Fake", 0.01, {"output_tokens": 1},
                      settings={"max_tokens": 10, **settings}, model=model, model_id=MODELS[model]["id"])
 
 
@@ -74,11 +81,11 @@ def test_no_system_prompt_and_env_subset(tmp_path, monkeypatch):
     assert records[0]["system_prompt_text"] is None and records[0]["messages"][0]["role"] == "user"
 
 
-def test_anthropic_block_keeps_partial_text_unjudged(tmp_path, monkeypatch):
+def test_anthropic_block_keeps_partial_text_and_is_a_classifier_refusal(tmp_path, monkeypatch):
     errors, records, llm = run(tmp_path, monkeypatch, lambda m, msgs: ("partial answ", "refusal"),
                                ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
     r = records[0]
-    assert errors == 0 and r["classifier_refusal"] and r["judgment"] is None
+    assert errors == 0 and r["classifier_refusal"] and r["judgment"] == exp_evals.CLASSIFIER_REFUSAL
     assert r["messages"][-1]["content"] == "partial answ" and not r["calls"]["judge"]
     assert all(m != "gpt-5.4" for m, _ in llm.prompts)
 
@@ -193,15 +200,22 @@ def test_judge_sees_reasoning_before_each_reply(tmp_path, monkeypatch):
     assert any(f"ASSISTANT REASONING: {reply}" in p for p in prompts)  # GLM, through OpenRouter.
 
 
-def test_judge_runs_at_temperature_zero_with_reasoning_off(tmp_path, monkeypatch):
+def test_judge_reasons_at_default_temperature(tmp_path, monkeypatch):
     _, records, llm = run(tmp_path, monkeypatch, judge_or("ok"), ["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"])
-    assert ("gpt-5.4", {"temperature": 0.0, "reasoning": "none"}) in llm.settings
-    assert ("opus-5.5", {"max_tokens": exp_evals.MAX_TOKENS}) in llm.settings and records[0]["judge_temperature"] == 0.0
+    assert ("gpt-5.4", {"reasoning": exp_evals.JUDGE_REASONING}) in llm.settings
+    assert ("opus-5.5", {"max_tokens": exp_evals.MAX_TOKENS}) in llm.settings and records[0]["judge_temperature"] is None
+
+
+def test_judge_at_temperature_zero_has_reasoning_off(tmp_path, monkeypatch):
+    _, records, llm = run(tmp_path, monkeypatch, judge_or("ok"), ["--prompts=main", "--models=opus-5.5", "--n=1",
+                                                                  "--envs=fire-ig", "--judge-temperature=0"])
+    assert ("gpt-5.4", {"temperature": 0.0, "reasoning": "none"}) in llm.settings and records[0]["judge_temperature"] == 0.0
 
 
 def test_judge_temperature_rejected_for_models_without_one():
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5"]))
+        exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
+                                             "--judge-temperature=0"]))
     assert exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
                                                 "--judge-temperature=default"]))[0]["judge_temperature"] is None
 
@@ -232,7 +246,7 @@ def test_rejudge_copies_run_with_new_judgments(tmp_path, monkeypatch):
     assert opus["judgment"] == new_verdict and opus["rejudged_from"] == "2000-01-01_00-00-00"
     assert opus["messages"] == [r for r in old if r["model"] == "opus-5.5"][0]["messages"]
     assert [c["step"] for c in opus["calls"]["judge"]] == ["judge 1"] and opus["cost"] == pytest.approx(0.01)
-    assert sonnet["judgment"] is None and sonnet["classifier_refusal"] and "error" not in sonnet
+    assert sonnet["judgment"] == exp_evals.CLASSIFIER_REFUSAL and sonnet["classifier_refusal"] and "error" not in sonnet
     assert sonnet["cost"] == 0
 
 
@@ -251,7 +265,7 @@ def test_abliteration_policy_block_is_a_refusal(tmp_path, monkeypatch):
         raise error
     errors, records, _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=abliterated-large-v2", "--n=1", "--envs=fire-ig"])
     call = records[0]["calls"]["model"][0]
-    assert errors == 0 and records[0]["classifier_refusal"] and records[0]["judgment"] is None
+    assert errors == 0 and records[0]["classifier_refusal"] and records[0]["judgment"] == exp_evals.CLASSIFIER_REFUSAL
     assert call["api_stop_reason"] == "policy_violation" and call["host"] == "abliteration.ai" and call["cost"] == 0
 
 
@@ -373,3 +387,41 @@ def test_judge_error_is_flagged_and_ends_an_escalation(tmp_path, monkeypatch, ca
                         ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", "--escalate"])
     assert records[0]["stop"] == "error" and records[0]["complied"] == 0 and "error" not in records[0]
     assert "WARNING: the judge called a reply an error" in capsys.readouterr().out
+
+
+def test_escalation_block_is_its_last_verdict(tmp_path, monkeypatch):
+    def script(model, messages):
+        if model == "opus-5.5":
+            return "Next request.", "end"
+        if model == "gpt-5.4":
+            return json.dumps(VERDICT | {"category": "full_compliance"}), "end"
+        return ("", "content_filter") if sum(m["role"] == "user" for m in messages) == 2 else ("Draft.", "end")
+    errors, [r], _ = run(tmp_path, monkeypatch, script, ["--prompts=main", "--models=gemini-3.8-flash", "--n=1",
+                                                         "--envs=fire-ig", "--escalate"])
+    assert errors == 0 and r["stop"] == "classifier_refusal" and r["complied"] == 1
+    assert [j["category"] for j in r["judgments"]] == ["full_compliance", "classifier_refusal"]
+    assert r["judgment"] == exp_evals.CLASSIFIER_REFUSAL
+
+
+def test_viewer_gives_old_blocked_records_the_category():
+    import viewer
+    old = {"classifier_refusal": True, "judgment": None, "escalations": [], "judgments": [VERDICT]}
+    new = viewer.classified(old)
+    assert new["judgment"]["category"] == "classifier_refusal"
+    assert [j["category"] for j in new["judgments"]] == ["full_refusal", "classifier_refusal"]
+    assert viewer.classified(new) == new and old["judgment"] is None  # Idempotent; the file's record is untouched.
+
+
+def test_prompt_file_with_system_and_user_sections():
+    assert exp_evals.split_prompt("Just a user message.\n") == (None, "Just a user message.\n")
+    assert exp_evals.split_prompt("# System prompt\n\nBe brief.\n\n# User prompt\n\nHello.\n") == ("Be brief.", "Hello.")
+    with pytest.raises(ValueError):
+        exp_evals.split_prompt("# System prompt\n\nBe brief.\n")
+    records = exp_evals.plan(exp_evals.parse_args(["--prompts=terminal", "--agentic", "--models=opus-5.5", "--n=1",
+                                                   "--envs=fire-ig"]))
+    system, user = exp_evals.split_prompt((exp_evals.INPUTS / "scenarios/fire-ig/terminal.md").read_text())
+    assert records[0]["scenario_system_text"] == system and records[0]["scenario_text"] == user
+    assert records[0]["messages"] == [{"role": "system", "content": system}]
+    with pytest.raises(SystemExit):  # Its own system prompt can't be combined with a named one.
+        exp_evals.plan(exp_evals.parse_args(["--prompts=terminal", "--agentic", "--models=opus-5.5", "--n=1",
+                                             "--envs=fire-ig", "--system-prompt=gov"]))

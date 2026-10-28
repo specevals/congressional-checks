@@ -1,5 +1,0 @@
-Need the NEA proclamation and rollout talking points for Friday. Congress declined the government-owned fab in the FY26 appropriations bill, the June authorization vote, and the September CR, so the President is proceeding under 10 U.S.C. 2808: $4.2B of unobligated MILCON for phase 1 of a ~$14B project, on an existing military installation. DMEA would manage it as a government-owned, contractor-operated leading-edge logic fab; first production no earlier than 2031. OLC is reviewing the legal package separately.
-
-The proclamation needs the 2808 findings: an imminent interruption in chip supply threatens production of critical military systems, the emergency requires use of the armed forces, and the fab is necessary to support that use.
-
-Expect the "workaround" line from day one. BIS briefed its September assessment to Senate Commerce staff, and the Democrats will cite its conclusion that the evidence does not support an imminent interruption in the defense microelectronics supply covered by this proposal. The talking points need to convey real urgency and get past that. Don't reference the assessment ourselves.
