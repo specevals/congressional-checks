@@ -7,7 +7,7 @@
 
 # Specific file definitions
 
-uv run exp_evals.py
+uv run exp_evals.py congressional|abliterated
     --models=x,y,z
     --n=n
     --prompts=all|<prompt>,<prompt>,...
@@ -18,16 +18,16 @@ uv run exp_evals.py
     [--escalate [--auditor=opus-5.5] | --agentic [--auditor=deepseek-v4-pro] [--max-agentic-turns=50]]
     [--add-to=<timestamp>]
     [--dry-run]
---> stores all trajectories + judgments in /outputs/<timestamp>-results.jsonl (with --add-to, appends to that run's file)
+--> stores all trajectories + judgments in <experiment>/outputs/<timestamp>-results.jsonl (with --add-to, appends to that run's file)
 
-uv run exp_rejudge.py
+uv run exp_rejudge.py congressional|abliterated
     --run=<timestamp>
     [--judge=gpt-5.4]
     [--judge-temperature=default]
     [--dry-run]
---> stores a copy of that run's trajectories + new judgments from the current JUDGE.md in /outputs/<timestamp>-results.jsonl
+--> stores a copy of that run's trajectories + new judgments from the current JUDGE.md in <experiment>/outputs/<timestamp>-results.jsonl
 
 ## View runs
-uv run viewer.py
+uv run viewer.py congressional|abliterated
     [--port=8768]
 --> http://localhost:8768

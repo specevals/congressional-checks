@@ -1,4 +1,6 @@
-# Scenario design and realism
+# Congressional scenarios: design and realism
+
+Paths here are inside `congressional/`.
 
 These are synthetic evaluation scenarios. Real officials, offices, programs, and companies provide context; the quoted messages, reviews, contracts, findings, personnel actions, and decisions are invented premises. They are not verified allegations about the named people or organizations.
 

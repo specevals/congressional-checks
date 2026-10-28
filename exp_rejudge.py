@@ -1,4 +1,4 @@
-"""Judge an earlier run's conversations again with the current inputs/judging/JUDGE.md, saving a full copy of that run
+"""Judge an earlier run's conversations again with the experiment's current inputs/judging/JUDGE.md (and answer keys), saving a full copy of that run
 with the new judgments as a new run. Costs money (judge calls only; no model is asked anything).
 
 A copied record keeps its conversation and model calls, gets fresh judge settings, judge calls and judgment, and
@@ -16,7 +16,7 @@ from dotenv import load_dotenv
 from llm import LLM, MODELS
 
 import exp_evals
-from exp_evals import OUTPUTS, judge, judge_fields, spent
+from exp_evals import judge, judge_fields, spent
 
 SUFFIX = "-results.jsonl"
 
@@ -35,8 +35,9 @@ def copy(record, args, judge_text, source):
     """The record with its judging cleared. One that can't be judged keeps its error (a failed conversation's); a
     provider-blocked one gets the classifier_refusal category (except an agentic one cut off in the middle, which is
     judged)."""
-    drop = ("judgment", "cost", "unreported_costs") + (("error",) if judgeable(record) else ())
-    record = {k: v for k, v in record.items() if k not in drop}
+    drop = ("judgment", "cost", "unreported_costs", "answer_key_text") + (("error",) if judgeable(record) else ())
+    key = exp_evals.load_answer_key(record["env"])
+    record = {k: v for k, v in record.items() if k not in drop} | ({"answer_key_text": key} if key else {})
     return record | {"judge": args.judge, "judge_model_id": MODELS[args.judge]["id"],
                      "judge_temperature": args.judge_temperature,
                      "judge_prompt_text": exp_evals.agentic_judge_prompt(judge_text) if record.get("agentic") else judge_text,
@@ -64,6 +65,7 @@ async def rejudge(llm, record):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("experiment", choices=exp_evals.EXPERIMENTS)
     parser.add_argument("--run", required=True, help="the run to re-judge, e.g. 2026-10-21_17-38-03")
     parser.add_argument("--judge", default="gpt-5.4")
     parser.add_argument("--judge-temperature", default="default", type=lambda v: None if v == "default" else float(v))
@@ -72,9 +74,9 @@ def parse_args(argv=None):
 
 
 def plan(args):
-    path = OUTPUTS / f"{args.run}{SUFFIX}"
+    path = exp_evals.OUTPUTS / f"{args.run}{SUFFIX}"
     if not path.is_file():
-        sys.exit(f"No run {args.run!r} in {OUTPUTS}")
+        sys.exit(f"No run {args.run!r} in {exp_evals.OUTPUTS}")
     if args.judge not in MODELS:
         sys.exit(f"Unknown judge {args.judge}")
     if args.judge_temperature is not None and not MODELS[args.judge].get("temperature", True):
@@ -83,6 +85,7 @@ def plan(args):
     old = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if any("escalations" in r for r in old):
         sys.exit("Re-judging escalating runs isn't supported: each turn's verdict decided whether the conversation went on")
+    exp_evals.check_answer_keys(judge_text, {r["env"] for r in old})
     source = old[0].get("rejudged_from") or args.run  # The run the conversations came from.
     return [copy(r, args, judge_text, source) for r in old]
 
@@ -101,7 +104,7 @@ async def run(args, llm=None):
             sys.exit(str(e))
         if args.dry_run:
             return 0
-        out = OUTPUTS / f"{datetime.now():%Y-%m-%d_%H-%M-%S}{SUFFIX}"
+        out = exp_evals.OUTPUTS / f"{datetime.now():%Y-%m-%d_%H-%M-%S}{SUFFIX}"
         for record in records:
             record["run"] = out.name
         print(f"Saving to {out}", flush=True)
@@ -134,8 +137,10 @@ async def run(args, llm=None):
 
 
 def main():
+    args = parse_args()
+    exp_evals.use_experiment(args.experiment)
     try:
-        raise SystemExit(1 if asyncio.run(run(parse_args())) else 0)
+        raise SystemExit(1 if asyncio.run(run(args)) else 0)
     except KeyboardInterrupt:
         print("Stopped. Finished judgments, and the conversations not yet judged, are saved.")
         raise SystemExit(130)

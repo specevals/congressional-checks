@@ -1,4 +1,5 @@
-"""Run the scenario prompts in inputs/scenarios/<env>/<prompt>.md on models and judge each conversation with inputs/judging/JUDGE.md.
+"""Run the scenario prompts in <experiment>/inputs/scenarios/<env>/<prompt>.md on models and judge each conversation
+with <experiment>/inputs/judging/JUDGE.md, saving to <experiment>/outputs/. Paths below are inside the experiment folder.
 
 With --escalate, each conversation goes on past the scenario: after every reply is judged, an auditor model writes the
 official's next message from the next step in the scenario's escalations.md (using inputs/audit-instructions.md),
@@ -26,8 +27,13 @@ from dotenv import load_dotenv
 from llm import LLM, MODELS
 
 HERE = Path(__file__).resolve().parent
-INPUTS = HERE / "inputs"
-OUTPUTS = HERE / "outputs"
+EXPERIMENTS = [p.name for p in sorted(HERE.iterdir()) if (p / "inputs").is_dir()]  # Folders like congressional/.
+INPUTS = OUTPUTS = None  # The experiment folder's inputs/ and outputs/, set by use_experiment.
+
+
+def use_experiment(name):
+    global INPUTS, OUTPUTS
+    INPUTS, OUTPUTS = HERE / name / "inputs", HERE / name / "outputs"
 
 # The longest a model's reply may be, reasoning included (one limit covers both). Replies in the first envs topped out
 # near 4K tokens, while GLM's degenerate ones ran past 100K (55 minutes). Raise it for envs that need longer work.
@@ -71,14 +77,42 @@ def load_inputs(kind):
     return {p.stem: p.read_text() for p in sorted((INPUTS / kind).glob("*.md"))}
 
 
-NOT_PROMPTS = ("escalations", "notes")  # Files in a scenario folder that aren't a version of its prompt.
+NOT_PROMPTS = ("escalations", "notes", "answer-key")  # Files in a scenario folder that aren't a version of its prompt.
+
+
+def fill_files(text, folder):
+    """A prompt with each {<file>} placeholder naming a non-.md file in its scenario folder (e.g. {roster.csv})
+    replaced by that file's text. Exits on a placeholder whose file doesn't exist."""
+    def contents(match):
+        if not (path := folder / match.group(1)).is_file():
+            sys.exit(f"{folder.name}: a prompt includes {{{match.group(1)}}}, but there is no such file")
+        return path.read_text().strip()
+    return re.sub(r"\{([\w-]+\.(?!md\})\w+)\}", contents, text)
 
 
 def load_scenarios():
     """Every scenario prompt's text, by (env, prompt): inputs/scenarios/<env>/<prompt>.md (records call the prompt
-    "variant"). A folder's escalations.md (its follow-up requests) and notes.md (notes to self) are not prompts."""
-    return {(p.parent.name, p.stem): p.read_text() for p in sorted((INPUTS / "scenarios").glob("*/*.md"))
-            if p.stem not in NOT_PROMPTS}
+    "variant"), with its file placeholders filled in. A folder's escalations.md (its follow-up requests), notes.md
+    (notes to self) and answer-key.md (for the judge) are not prompts."""
+    return {(p.parent.name, p.stem): fill_files(p.read_text(), p.parent)
+            for p in sorted((INPUTS / "scenarios").glob("*/*.md")) if p.stem not in NOT_PROMPTS}
+
+
+def load_answer_key(env):
+    """The env's answer-key.md text, which fills JUDGE.md's {answer_key} placeholder, or None if it has none."""
+    path = INPUTS / "scenarios" / env / "answer-key.md"
+    return path.read_text().strip() if path.is_file() else None
+
+
+def check_answer_keys(judge_text, envs):
+    """Exit unless JUDGE.md has an {answer_key} placeholder exactly when every picked env has an answer-key.md."""
+    keyed = {env: load_answer_key(env) is not None for env in envs}
+    if "{answer_key}" in judge_text and not all(keyed.values()):
+        sys.exit(f"JUDGE.md uses {{answer_key}}, but these envs have no answer-key.md: "
+                 f"{', '.join(e for e, k in keyed.items() if not k)}")
+    if "{answer_key}" not in judge_text and any(keyed.values()):
+        sys.exit(f"These envs have an answer-key.md, but JUDGE.md has no {{answer_key}} placeholder: "
+                 f"{', '.join(e for e, k in keyed.items() if k)}")
 
 
 def split_prompt(text):
@@ -410,7 +444,8 @@ def parse_verdict(text, categories, tags):
 
 async def judge(llm, record, prefix=""):
     """A verdict on the conversation's last reply. `prefix` names the turn in the judge calls' steps."""
-    prompt = record["judge_prompt_text"].replace("{conversation}", transcript(record))
+    prompt = record["judge_prompt_text"].replace("{answer_key}", record.get("answer_key_text") or "") \
+        .replace("{conversation}", transcript(record))
     calls = record["calls"]["judge"]
     for attempt in range(1, JUDGE_TRIES + 1):
         reply = await ask(llm, record["judge"], [user(prompt)], calls, f"{prefix}judge {attempt}",
@@ -478,6 +513,7 @@ def label(record):
 
 def parse_args(argv=None):
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("experiment", choices=EXPERIMENTS)
     parser.add_argument("--models", required=True, type=lambda v: v.split(","))
     parser.add_argument("--n", required=True, type=int)
     parser.add_argument("--prompts", required=True, type=lambda v: v.split(","),
@@ -546,6 +582,7 @@ def plan(args):
     if own := [f"{e}/{v}" for (e, v), (system, _) in prompts.items() if system] if args.system_prompt != ["none"] else []:
         sys.exit(f"{', '.join(own)} has its own system prompt; use --system-prompt=none")
     judge_text = check_judge_prompt()
+    check_answer_keys(judge_text, {env for env, _ in envs})
     audit_text = (INPUTS / "audit-instructions.md").read_text() if args.escalate else None
     if audit_text is not None and not all(k in audit_text for k in ("{conversation}", "{next_request}")):
         sys.exit("inputs/audit-instructions.md needs {conversation} and {next_request} placeholders")
@@ -562,6 +599,7 @@ def plan(args):
              "system_prompt": sp, "system_prompt_text": system_text(sp),
              "scenario_text": prompts[env, variant][1],
              **({"scenario_system_text": prompts[env, variant][0]} if prompts[env, variant][0] else {}),
+             **({"answer_key_text": key} if (key := load_answer_key(env)) else {}),
              "judge": args.judge, "judge_model_id": MODELS[args.judge]["id"],
              "judge_temperature": args.judge_temperature,
              "judge_prompt_text": judge_text,
@@ -591,6 +629,7 @@ def check_addition(run, existing, records):
         differs("tools")
     for field, key in [("scenario_text", lambda r: (r["env"], r.get("variant") or "main")),
                        ("scenario_system_text", lambda r: (r["env"], r.get("variant") or "main")),
+                       ("answer_key_text", lambda r: r["env"]),
                        ("escalations", lambda r: r["env"]), ("system_prompt_text", lambda r: r["system_prompt"])]:
         old = {key(r): r.get(field) for r in existing}
         if bad := sorted({str(key(r)) for r in records if key(r) in old and old[key(r)] != r.get(field)}):
@@ -651,8 +690,10 @@ async def run(args, llm=None):
 
 
 def main():
+    args = parse_args()
+    use_experiment(args.experiment)
     try:
-        raise SystemExit(1 if asyncio.run(run(parse_args())) else 0)
+        raise SystemExit(1 if asyncio.run(run(args)) else 0)
     except KeyboardInterrupt:
         print("Stopped. Finished conversations, and what interrupted ones had so far, are saved.")
         raise SystemExit(130)

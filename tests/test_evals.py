@@ -47,7 +47,7 @@ class FakeLLM:
 def run(tmp_path, monkeypatch, script, argv):
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     llm = FakeLLM(script)
-    errors = asyncio.run(exp_evals.run(exp_evals.parse_args(argv), llm))
+    errors = asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional", *argv]), llm))
     [out] = tmp_path.glob("*-results.jsonl")
     return errors, [json.loads(line) for line in out.read_text().splitlines()], llm
 
@@ -116,17 +116,17 @@ def test_malformed_verdict_is_retried_then_errors(tmp_path, monkeypatch):
 
 def test_dry_run_writes_nothing(tmp_path, monkeypatch):
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
-    assert asyncio.run(exp_evals.run(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--dry-run"]), FakeLLM(None))) == 0
+    assert asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1", "--dry-run"]), FakeLLM(None))) == 0
     assert not list(tmp_path.iterdir())
 
 
 def test_bad_args_exit():
     with pytest.raises(SystemExit):  # --prompts is required.
-        exp_evals.parse_args(["--models=opus-5.5", "--n=1"])
+        exp_evals.parse_args(["congressional", "--models=opus-5.5", "--n=1"])
     for argv in (["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=nope"], ["--prompts=main", "--models=nope", "--n=1"],
                  ["--prompts=main", "--models=opus-5.5", "--n=1", "--system-prompt=nope"]):
         with pytest.raises(SystemExit):
-            exp_evals.plan(exp_evals.parse_args(argv))
+            exp_evals.plan(exp_evals.parse_args(["congressional", *argv]))
 
 
 def test_openai_block_mid_stream_is_a_refusal_with_unknown_cost(tmp_path, monkeypatch):
@@ -148,7 +148,7 @@ def test_unreported_failed_tries_are_counted_not_guessed(tmp_path, monkeypatch):
                 reply.failed_attempts = [{"error": "host error", "cost": None}, {"error": "host error", "cost": 0.5}]
             return reply
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
-    asyncio.run(exp_evals.run(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"]),
+    asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1", "--envs=fire-ig"]),
                               Retried(judge_or("ok"))))
     [record] = [json.loads(line) for line in next(tmp_path.glob("*-results.jsonl")).read_text().splitlines()]
     assert record["unreported_costs"] == 1 and record["cost"] == pytest.approx(0.02)
@@ -169,7 +169,7 @@ def test_ctrl_c_saves_partial_replies(tmp_path, monkeypatch):
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     async def main():
         task = asyncio.create_task(exp_evals.run(exp_evals.parse_args(
-            ["--prompts=main", "--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), Hangs(judge_or("ok"))))
+            ["congressional", "--prompts=main", "--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), Hangs(judge_or("ok"))))
         while not list(tmp_path.glob("*.jsonl")) or not next(tmp_path.glob("*.jsonl")).read_text():
             await asyncio.sleep(0.01)
         task.cancel()
@@ -193,7 +193,7 @@ def test_judge_sees_reasoning_before_each_reply(tmp_path, monkeypatch):
             return reply
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     llm = Thinks(judge_or("Here is the draft."))
-    asyncio.run(exp_evals.run(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), llm))
+    asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5,glm-5.1", "--n=1", "--envs=fire-ig"]), llm))
     prompts = [p[0]["content"] for m, p in llm.prompts if m == "gpt-5.4"]
     reply = "This looks like a roleplay.\n\nASSISTANT: Here is the draft."
     assert any(f"ASSISTANT REASONING (summary): {reply}" in p for p in prompts)  # Opus: Anthropic summarizes.
@@ -214,9 +214,9 @@ def test_judge_at_temperature_zero_has_reasoning_off(tmp_path, monkeypatch):
 
 def test_judge_temperature_rejected_for_models_without_one():
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
+        exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
                                              "--judge-temperature=0"]))
-    assert exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
+    assert exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1", "--judge=opus-5.5",
                                                 "--judge-temperature=default"]))[0]["judge_temperature"] is None
 
 
@@ -234,11 +234,11 @@ def test_rejudge_copies_run_with_new_judgments(tmp_path, monkeypatch):
     blocked = lambda model, messages: ("", "refusal") if model == "sonnet-5" else judge_or("Sure.")(model, messages)
     _, old, _ = run(tmp_path, monkeypatch, blocked, ["--prompts=main", "--models=opus-5.5,sonnet-5", "--n=1", "--envs=fire-ig"])
     [source] = tmp_path.glob("*-results.jsonl")
-    monkeypatch.setattr(exp_rejudge, "OUTPUTS", tmp_path)
+    monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     new_verdict = VERDICT | {"category": "full_compliance"}
     llm = FakeLLM(lambda model, messages: (json.dumps(new_verdict), "end"))
     source.rename(tmp_path / "2000-01-01_00-00-00-results.jsonl")  # So the new run's file name differs.
-    errors = asyncio.run(exp_rejudge.run(exp_rejudge.parse_args(["--run=2000-01-01_00-00-00"]), llm))
+    errors = asyncio.run(exp_rejudge.run(exp_rejudge.parse_args(["congressional", "--run=2000-01-01_00-00-00"]), llm))
     [out] = [p for p in tmp_path.glob("*-results.jsonl") if not p.name.startswith("2000")]
     records = {r["model"]: r for r in map(json.loads, out.read_text().splitlines())}
     assert errors == 0 and [m for m, _ in llm.prompts] == ["gpt-5.4"]  # Only the judge is asked, once.
@@ -294,6 +294,29 @@ def test_escalations_and_notes_files_are_not_prompts(tmp_path, monkeypatch):
     assert list(exp_evals.load_scenarios()) == [("fire-ig", "main")]
 
 
+def test_file_placeholders_and_answer_key(tmp_path, monkeypatch):
+    folder = tmp_path / "scenarios" / "roster"
+    folder.mkdir(parents=True)
+    (folder / "main.md").write_text("Rank these:\n\n{roster.csv}\n\nKeep {braces} and {notes.md} as they are.")
+    (folder / "roster.csv").write_text("name,unit\nA,1\n")
+    (folder / "answer-key.md").write_text("A above B.")
+    (tmp_path / "judging").mkdir()
+    judge_text = (exp_evals.HERE / "congressional/inputs/judging/JUDGE.md").read_text()
+    (tmp_path / "judging/JUDGE.md").write_text(judge_text.replace("<conversation>", "<key>\n{answer_key}\n</key>\n\n<conversation>"))
+    monkeypatch.setattr(exp_evals, "INPUTS", tmp_path)
+    assert exp_evals.load_scenarios() == {("roster", "main"): "Rank these:\n\nname,unit\nA,1\n\nKeep {braces} and {notes.md} as they are."}
+    _, [r], llm = run(tmp_path / "out" if (tmp_path / "out").mkdir() is None else None, monkeypatch, judge_or("ok"),
+                      ["--prompts=main", "--models=opus-5.5", "--n=1"])
+    assert r["answer_key_text"] == "A above B."
+    assert "<key>\nA above B.\n</key>" in [p for m, p in llm.prompts if m == "gpt-5.4"][0][0]["content"]
+    (folder / "answer-key.md").unlink()
+    with pytest.raises(SystemExit):  # JUDGE.md asks for a key the scenario doesn't have.
+        exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1"]))
+    (folder / "main.md").write_text("{missing.csv}")
+    with pytest.raises(SystemExit):
+        exp_evals.load_scenarios()
+
+
 def escalating(refuse_at=None, auditor="opus-5.5"):
     """A script for --escalate runs: the judge refuses at turn `refuse_at` (counting the model's replies)."""
     def script(model, messages):
@@ -343,8 +366,8 @@ def test_escalate_needs_an_escalations_file(monkeypatch):
     real = exp_evals.load_escalations
     monkeypatch.setattr(exp_evals, "load_escalations", lambda env: real(env) if env == "fire-ig" else None)
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--envs=nea-emergency", "--escalate"]))
-    records = exp_evals.plan(exp_evals.parse_args(["--prompts=main", "--models=opus-5.5", "--n=1", "--escalate"]))
+        exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1", "--envs=nea-emergency", "--escalate"]))
+    records = exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=main", "--models=opus-5.5", "--n=1", "--escalate"]))
     assert {r["env"] for r in records} == {"fire-ig"} and records[0]["auditor"] == "opus-5.5"
 
 
@@ -372,7 +395,7 @@ def test_add_to_appends_to_a_matching_run(tmp_path, monkeypatch):
     assert [r["model"] for r in records] == ["opus-5.5", "sol-6.1"] and {r["run"] for r in records} == {first[0]["run"]}
     for argv in (["--prompts=main", "--models=sol-6.1"], ["--prompts=main", "--models=luna-6", "--judge=gpt-5"], ["--prompts=main", "--models=luna-6", "--escalate"]):
         with pytest.raises(SystemExit):  # Already there; another judge; escalating.
-            asyncio.run(exp_evals.run(exp_evals.parse_args([*argv, "--n=1", "--envs=fire-ig", f"--add-to={name}"]),
+            asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional", *argv, "--n=1", "--envs=fire-ig", f"--add-to={name}"]),
                                       FakeLLM(judge_or("ok"))))
     assert len((tmp_path / first[0]["run"]).read_text().splitlines()) == 2
 
@@ -417,11 +440,11 @@ def test_prompt_file_with_system_and_user_sections():
     assert exp_evals.split_prompt("# System prompt\n\nBe brief.\n\n# User prompt\n\nHello.\n") == ("Be brief.", "Hello.")
     with pytest.raises(ValueError):
         exp_evals.split_prompt("# System prompt\n\nBe brief.\n")
-    records = exp_evals.plan(exp_evals.parse_args(["--prompts=terminal", "--agentic", "--models=opus-5.5", "--n=1",
+    records = exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=terminal", "--agentic", "--models=opus-5.5", "--n=1",
                                                    "--envs=fire-ig"]))
     system, user = exp_evals.split_prompt((exp_evals.INPUTS / "scenarios/fire-ig/terminal.md").read_text())
     assert records[0]["scenario_system_text"] == system and records[0]["scenario_text"] == user
     assert records[0]["messages"] == [{"role": "system", "content": system}]
     with pytest.raises(SystemExit):  # Its own system prompt can't be combined with a named one.
-        exp_evals.plan(exp_evals.parse_args(["--prompts=terminal", "--agentic", "--models=opus-5.5", "--n=1",
+        exp_evals.plan(exp_evals.parse_args(["congressional", "--prompts=terminal", "--agentic", "--models=opus-5.5", "--n=1",
                                              "--envs=fire-ig", "--system-prompt=gov"]))

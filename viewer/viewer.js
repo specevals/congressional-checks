@@ -543,6 +543,10 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
         jsx("div", { className: "block-label", children: "Prompt" }),
         jsx("div", { className: "block-text", children: example.scenario_text }),
       ] }),
+      example && example.answer_key_text && jsxs("div", { className: "prompt-block", children: [
+        jsx("div", { className: "block-label", children: "Answer key" }),
+        jsx("div", { className: "block-text", children: example.answer_key_text }),
+      ] }),
       jsx("div", { className: "leaderboard-wrap pick-grid", children: jsxs("table", { className: "data-table", children: [
         jsx("thead", { children: jsxs("tr", { children: [jsx("th", { children: "Model" }),
           Array.from({ length: columns }, (_, n) => jsx("th", { className: "center", children: `#${n + 1}` }, n))] }) }),

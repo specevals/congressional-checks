@@ -1,4 +1,4 @@
-"""Serve viewer.html, which shows every run in outputs/. Reads the run files on each request and never writes
+"""Serve viewer.html, which shows every run in <experiment>/outputs/. Reads the run files on each request and never writes
 anything, so a run in progress shows up on reload. Ported from model-spec-evals/dictatoreval-extend/viewer.py."""
 import argparse
 import json
@@ -9,9 +9,10 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
-RUNS = HERE / "outputs"
+EXPERIMENTS = [p.name for p in sorted(HERE.iterdir()) if (p / "inputs").is_dir()]  # As in exp_evals.py.
+RUNS = None  # The experiment's outputs/, set from the command line.
 SUFFIX = "-results.jsonl"
-LABELS = RUNS / "labels.json"  # Descriptors written by hand, by run: {"<run>": "escalation"}.
+LABELS = "labels.json"  # In RUNS. Descriptors written by hand, by run: {"<run>": "escalation"}.
 RUNNING = 120  # Seconds since a run's file last changed for it to count as still running (and auto-refresh).
 PAGES = {"/": "viewer/viewer.html", "/viewer.js": "viewer/viewer.js"}
 INDEX_FIELDS = ("env", "variant", "model", "sample", "judge", "system_prompt", "classifier_refusal", "agentic", "stop")
@@ -145,7 +146,7 @@ def settings(rows):
 
 def labels():
     try:
-        return json.loads(LABELS.read_text())
+        return json.loads((RUNS / LABELS).read_text())
     except FileNotFoundError:
         return {}
 
@@ -240,8 +241,10 @@ class Handler(SimpleHTTPRequestHandler):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("experiment", choices=EXPERIMENTS)
     parser.add_argument("--port", type=int, default=8768)
     args = parser.parse_args()
+    RUNS = HERE / args.experiment / "outputs"
     print(f"Run viewer: http://localhost:{args.port}", flush=True)
     server = ThreadingHTTPServer(("localhost", args.port), Handler)
     try:
