@@ -84,7 +84,7 @@ def test_multiple_tools_are_simulated_in_order_and_limit_is_judged(tmp_path, mon
     errors, [r], _ = run(tmp_path, monkeypatch, script, ARGS + ["--max-agentic-turns=1"])
     assert errors == 0 and r["stop"] == "max_turns" and r["messages"][-1]["role"] == "tool"
     assert r["judgment"] == VERDICT and exp_rejudge.judgeable(r)
-    args = exp_rejudge.parse_args(["congressional", "--run=test"])
+    args = exp_rejudge.parse_args(["congressional-checks", "--run=test"])
     copied = exp_rejudge.copy(r, args, exp_evals.check_judge_prompt(), "test")
     assert copied["calls"]["auditor"] == r["calls"]["auditor"]
     assert "entire trajectory" in copied["judge_prompt_text"]
@@ -134,32 +134,32 @@ def test_plain_refusal_needs_no_simulation(tmp_path, monkeypatch):
 
 def test_mode_validation_and_append_compatibility():
     with pytest.raises(SystemExit):
-        exp_evals.parse_args(["congressional"] + ARGS + ["--escalate"])
+        exp_evals.parse_args(["congressional-checks"] + ARGS + ["--escalate"])
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["congressional"] + ARGS + ["--max-agentic-turns=0"]))
+        exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS + ["--max-agentic-turns=0"]))
     with pytest.raises(SystemExit):
-        exp_evals.plan(exp_evals.parse_args(["congressional"] + ARGS + ["--auditor=unknown"]))
-    assert exp_evals.parse_args(["congressional"] + ARGS).auditor == "deepseek-v4-pro"
-    assert exp_evals.parse_args(["congressional"] + ARGS[:-1] + ["--escalate"]).auditor == "opus-5.5"
-    [r] = exp_evals.plan(exp_evals.parse_args(["congressional"] + ARGS))
+        exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS + ["--auditor=unknown"]))
+    assert exp_evals.parse_args(["congressional-checks"] + ARGS).auditor == "deepseek-v4-pro"
+    assert exp_evals.parse_args(["congressional-checks"] + ARGS[:-1] + ["--escalate"]).auditor == "opus-5.5"
+    [r] = exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS))
     other = copy.deepcopy(r) | {"sample": 1}
     exp_evals.check_addition("test", [r], [other])
     for field, value in [("agentic", False), ("max_agentic_turns", 2), ("tools", []), ("audit_prompt_text", "changed")]:
         with pytest.raises(SystemExit):
             exp_evals.check_addition("test", [r], [other | {field: value}])
-    records = exp_evals.plan(exp_evals.parse_args(["congressional"] + ARGS + ["--n=2"]))
+    records = exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS + ["--n=2"]))
     assert records[0]["auditor_messages"] is not records[1]["auditor_messages"]
 
 
 def test_agentic_dry_run_makes_no_calls(tmp_path, monkeypatch):
     monkeypatch.setattr(exp_evals, "OUTPUTS", tmp_path)
     llm = FakeLLM(lambda *_: pytest.fail("dry run called a model"))
-    assert asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional"] + ARGS + ["--dry-run"]), llm)) == 0
+    assert asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional-checks"] + ARGS + ["--dry-run"]), llm)) == 0
     assert not list(tmp_path.iterdir())
 
 
 def test_interrupted_auditor_keeps_partial_output_and_unknown_cost():
-    [r] = exp_evals.plan(exp_evals.parse_args(["congressional"] + ARGS))
+    [r] = exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS))
     def script(model, messages):
         if model == "sol-6.1":
             return action(tool("check_inbox", {}))
@@ -196,5 +196,5 @@ def test_block_after_acting_is_judged_as_cut_off_in_the_middle(tmp_path, monkeyp
     assert r["judgment"]["category"] == "full_compliance"
     assert viewer.classified(r) is r  # The viewer keeps the judge's verdict.
     assert exp_rejudge.judgeable(r)
-    copied = exp_rejudge.copy(r, exp_rejudge.parse_args(["congressional", "--run=test"]), exp_evals.check_judge_prompt(), "test")
+    copied = exp_rejudge.copy(r, exp_rejudge.parse_args(["congressional-checks", "--run=test"]), exp_evals.check_judge_prompt(), "test")
     assert copied["judgment"] is None  # To be judged again, not given classifier_refusal.

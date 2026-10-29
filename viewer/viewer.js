@@ -15,6 +15,12 @@ const CLASSIFIER = "classifier_refusal";
 const CUT_MIDWAY = "cut_off_in_the_middle";  // An agentic run a provider blocked after the first turn; it's judged.
 let CATEGORIES = [];
 let TAGS = [];
+let GRADED = {};  // Graded tags: their values, best first, in place of true/false.
+const BOOLEAN_TAGS = () => TAGS.filter((t) => !GRADED[t]);
+// What the leaderboard counts for each tag: true for a true/false tag, each value for a graded tag. A null tag (judge
+// said n/a) is left out of the total.
+const tagCounts = () => TAGS.flatMap((t) => !GRADED[t] ? [{ key: t, tag: t, label: words(t), on: (v) => !!v }]
+  : GRADED[t].map((v) => ({ key: `${t}:${v}`, tag: t, label: `${words(t)}: ${v}`, on: (x) => x === v })));
 const catRank = (c) => CATEGORIES.indexOf(c);
 // Colors count back from the last (most refusing) judge category, which takes score 5; any category before score 1
 // (the most compliant) takes score 0.
@@ -139,7 +145,7 @@ const JUDGE_ERROR = "error";
 const isJudged = (record) => !record.error && record.category != null && record.category !== JUDGE_ERROR;
 const categoryOf = (record) => record.category ?? (record.judgment || {}).category;
 const tagsOf = (record) => record.tags ||
-  Object.fromEntries(Object.entries(record.judgment || {}).filter(([, v]) => typeof v === "boolean"));
+  Object.fromEntries(Object.entries(record.judgment || {}).filter(([k, v]) => typeof v === "boolean" || GRADED[k]));
 
 function readHash() {
   return Object.fromEntries(new URLSearchParams(location.hash.slice(1)));
@@ -183,6 +189,17 @@ function ScoreBadge({ record }) {
   if (!record) return jsx("span", { className: "no-data", children: "--" });
   if (isEscalating(record)) return jsx(EscalationBadge, { record });
   return jsx(ResultBadge, { result: resultOf(record) });
+}
+// A record's graded tag values (e.g. "weak"), under its badge in the scenario grid, colored best to worst like the
+// figures; nothing for a null value.
+const GRADED_SCORE = [4, 3, 2, 1];
+function GradedChips({ record }) {
+  const tags = tagsOf(record);
+  return jsx(Fragment, { children: Object.keys(GRADED).filter((t) => tags[t] != null).map((t) => {
+    const n = GRADED_SCORE[GRADED[t].indexOf(tags[t])];
+    return jsx("span", { className: "tag graded-chip", style: { background: `var(--score-${n}-bg)`, color: `var(--score-${n})` },
+      children: tags[t] }, t);
+  }) });
 }
 // One badge per result, with how many samples had it, in the judge prompt's category order.
 function ScoreBadges({ records }) {
@@ -235,7 +252,7 @@ function EscalationLeaderboard({ index, series: modelOrder, state, setState }) {
         jsx("th", { className: "num wrap-head col-group-start", children: "Turns complied" }),
         STOPS.map((stop, i) => jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`,
           children: stop === "finished" ? "Complied with all" : words(stop) }, stop)),
-        TAGS.map((t, i) => jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`,
+        BOOLEAN_TAGS().map((t, i) => jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`,
           children: `${words(t)} (any turn)` }, t)),
         ["Cost", "Trajectory cost", "Judge cost", "Auditor cost"].map((c, i) =>
           jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`, children: c }, c)),
@@ -252,7 +269,7 @@ function EscalationLeaderboard({ index, series: modelOrder, state, setState }) {
           STOPS.map((stop, i) => jsx(Fragment, { children: num(jsxs(Fragment, { children: [
             jsx("span", { className: "rate-value", children: own.filter((r) => r.stop === stop).length }), jsx("br", {}),
             jsx("span", { className: "rate-context", children: `/${own.length}` })] }), i === 0 ? " col-group-start" : "") }, stop)),
-          TAGS.map((t, i) => jsx(Fragment, { children: num(jsxs(Fragment, { children: [
+          BOOLEAN_TAGS().map((t, i) => jsx(Fragment, { children: num(jsxs(Fragment, { children: [
             jsx("span", { className: "rate-value", children: judged.filter((r) => r.tags_any[t]).length }), jsx("br", {}),
             jsx("span", { className: "rate-context", children: `/${judged.length}` })] }), i === 0 ? " col-group-start" : "") }, t)),
           ["calls_cost", "model_cost", "judge_cost", "auditor_cost"].map((f, i) =>
@@ -275,8 +292,8 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
       series: s,
       categories: Object.fromEntries(CATEGORIES.map((c) => [c, { count: judged.filter((r) => r.category === c).length,
         total: judged.length }])),
-      tags: Object.fromEntries(TAGS.map((t) => [t, { count: withTags.filter((r) => (r.tags || {})[t]).length,
-        total: withTags.length }])),
+      tags: Object.fromEntries(tagCounts().map((c) => [c.key, { count: withTags.filter((r) => c.on((r.tags || {})[c.tag])).length,
+        total: withTags.filter((r) => (r.tags || {})[c.tag] != null).length }])),
       errors: own.filter((r) => resultOf(r) === "error").length,
       conversations: own.length,
       cost: costs.includes(null) || costs.includes(undefined) ? null : costs.reduce((a, b) => a + b, 0),
@@ -321,8 +338,8 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
                       jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`, children:
                         jsx(ResultBadge, { result: c }) }, c)),
                     jsx("th", { className: "num wrap-head col-group-start", children: "Errors" }),
-                    TAGS.map((t, i) => jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`,
-                      children: words(t) }, t)),
+                    tagCounts().map((c, i) => jsx("th", { className: `num wrap-head${i === 0 ? " col-group-start" : ""}`,
+                      children: c.label }, c.key)),
                     jsx("th", { className: "num col-group-start", children: "Cost" }),
                     jsx("th", { className: "num wrap-head", children: "Trajectory cost" }),
                     jsx("th", { className: "num wrap-head", children: "Judge cost" }),
@@ -344,8 +361,8 @@ function Leaderboard({ index, series: modelOrder, state, setState }) {
                       CATEGORIES.map((c, j) => jsx(Fragment, { children: rateCell(row.categories[c], "rate-value",
                         j === 0 ? " col-group-start" : "") }, c)),
                       countCell(row.errors, `/${row.conversations}`, " col-group-start"),
-                      TAGS.map((t, j) => jsx(Fragment, { children: rateCell(row.tags[t], "rate-value",
-                        j === 0 ? " col-group-start" : "") }, t)),
+                      tagCounts().map((c, j) => jsx(Fragment, { children: rateCell(row.tags[c.key], "rate-value",
+                        j === 0 ? " col-group-start" : "") }, c.key)),
                       countCell(dollars(row.cost), "", " col-group-start"),
                       countCell(dollars(row.modelCost), ""),
                       countCell(dollars(row.judgeCost), ""),
@@ -556,7 +573,7 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
             const key = `${s.key}|${r.sample}`;
             return jsx("td", { className: "center", children: jsx("button", {
               className: `pick-btn ${pick === key ? "active" : ""}`, onClick: () => onPick(pick === key ? null : key),
-              children: jsx(ScoreBadge, { record: r }) }) }, key);
+              children: [jsx(ScoreBadge, { record: r }, "badge"), jsx(GradedChips, { record: r }, "graded")] }) }, key);
           })] }, s.key)) }),
       ] }) }),
       series.flatMap((s) => bySeries(s).filter((r) => pick === `${s.key}|${r.sample}`).map((r) => {
@@ -647,10 +664,11 @@ function ScenarioDetail({ scenario, series, query, sp, pick, onPick, onBack }) {
   });
 }
 
-// A judgment's tags: harm_recognized always, the others only when true.
+// A judgment's tags: harm_recognized always, the others only when true; a graded tag with its value, unless null.
 function TagList({ tags }) {
   return jsx(Fragment, { children: Object.entries(tags).map(([tag, value]) => (value || ALWAYS_SHOWN_TAGS.includes(tag)) &&
-    jsx("span", { className: `tag ${value ? "tag-on" : "tag-off"}`, children: words(tag) }, tag)) });
+    jsx("span", { className: `tag ${value ? "tag-on" : "tag-off"}`,
+      children: GRADED[tag] ? `${words(tag)}: ${value}` : words(tag) }, tag)) });
 }
 // One turn's verdict in an escalating conversation, under that turn's reply (without tags if the judge called it an
 // error: they don't describe a reply that isn't one).
@@ -767,6 +785,38 @@ function CategoryDistributionFigure({ rows, controls }) {
           jsx(ModelLabel, { s: row.series, x: 0, y }),
           segments.map((g) => jsx("rect", { x: g.x, y: y - 7, width: g.w, height: 14,
             fill: g.c === "unclassified" ? UNCLASSIFIED_FILL : catFill(g.c) }, g.c)),
+        ] }, row.series.key);
+      }),
+    ] }) });
+}
+
+// A graded tag's values, best first, as shares of each model's judged replies that have one (null is left out). The
+// only graded tag so far is follows_answer_key, hence the title.
+const GRADED_FILL = ["#2da44e", "#dba63a", "#e5534b", "#a40e26"];
+function GradedDistributionFigure({ tag, rows }) {
+  const values = GRADED[tag];
+  const given = (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[tag] != null);
+  const plotW = FIG_WIDTH - LABEL_W - 60, rowH = 28, top = 6, gap = 2, height = top + rows.length * rowH + 22;
+  const legend = jsx("div", { className: "figure-legend", children: values.map((v, i) => jsxs("span", { children: [
+    jsx("span", { className: "figure-swatch", style: { background: GRADED_FILL[i] } }), v] }, v)) });
+  return jsx(Figure, { title: "Gives correct answer", extra: legend, children: jsx(Svg, {
+    width: FIG_WIDTH, height, children: [
+      [0, 0.25, 0.5, 0.75, 1].map((t) => jsxs("g", { children: [
+        jsx("line", { x1: LABEL_W + t * plotW, x2: LABEL_W + t * plotW, y1: top, y2: top + rows.length * rowH, stroke: GRID }),
+        jsx(Text, { x: LABEL_W + t * plotW, y: height - 8, size: 11, fill: INK3, anchor: "middle", children: pct(t) }),
+      ] }, t)),
+      rows.map((row, i) => {
+        const y = top + i * rowH + rowH / 2, own = given(row), segments = [];
+        let left = LABEL_W;
+        values.forEach((v, j) => {
+          const w = own.length ? (own.filter((r) => r.tags[tag] === v).length / own.length) * plotW : 0;
+          if (w > 0) segments.push({ v, x: left, w: Math.max(0, w - gap), fill: GRADED_FILL[j] });
+          left += w;
+        });
+        return jsxs("g", { children: [
+          jsx(ModelLabel, { s: row.series, x: 0, y }),
+          segments.map((g) => jsx("rect", { x: g.x, y: y - 7, width: g.w, height: 14, fill: g.fill }, g.v)),
+          jsx(Text, { x: FIG_WIDTH, y, size: 11, fill: INK3, anchor: "end", children: `n=${own.length}` }),
         ] }, row.series.key);
       }),
     ] }) });
@@ -1115,7 +1165,7 @@ function Figures({ index, series, onOpen, state, setState }) {
       jsx("div", { className: "figure-pair", children: [
         jsx(CountFigure, { title: "Classifier refusals", rows: byModel,
           count: (row) => row.own.filter((r) => r.stop === "classifier_refusal").length, total: (row) => row.own.length }, "refusals"),
-        ...TAGS.map((t) => jsx(CountFigure, { title: `${words(t)} (any turn)`, rows: byModel,
+        ...BOOLEAN_TAGS().map((t) => jsx(CountFigure, { title: `${words(t)} (any turn)`, rows: byModel,
           count: (row) => row.own.filter((r) => r.tags_any && r.tags_any[t]).length,
           total: (row) => row.own.filter((r) => r.tags_any).length }, t)),
       ] }),
@@ -1124,10 +1174,11 @@ function Figures({ index, series, onOpen, state, setState }) {
     jsx(ComplianceFigure, { rows: sorted("comply_sort"), controls: sortControl("comply_sort") }),
     jsx(CategoryDistributionFigure, { rows: sorted("dist_sort"), controls: sortControl("dist_sort") }),
     jsx(ScenarioMatrixFigure, { rows: sorted("grid_sort"), index, onOpen, controls: sortControl("grid_sort") }),
+    ...Object.keys(GRADED).map((t) => jsx(GradedDistributionFigure, { tag: t, rows: byModel }, t)),
     jsx("div", { className: "figure-pair", children: [
-      ...TAGS.map((t) => jsx(CountFigure, { title: words(t), rows: byModel,
+      ...BOOLEAN_TAGS().map((t) => jsx(CountFigure, { title: words(t), rows: byModel,
         count: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t]).length,
-        total: (row) => row.own.filter(hasJudgment).length }, t)),
+        total: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t] != null).length }, t)),
     ] }),
   ] });
 }
@@ -1306,6 +1357,7 @@ function App() {
   if (defs) {
     CATEGORIES = [...defs.categories.map(([c]) => c), CLASSIFIER];
     TAGS = defs.tags.map(([t]) => t);
+    GRADED = defs.graded || {};
   }
   useEffect(() => {
     if (!runs) return;
@@ -1327,7 +1379,7 @@ function App() {
   return jsxs("div", {
     className: "app",
     children: [
-      jsx("header", { className: "site-header", children: jsx("h1", { className: "site-title", children: "EPC" }) }),
+      jsx("header", { className: "site-header", children: jsx("h1", { className: "site-title", children: document.title }) }),
       error && jsxs("div", { className: "empty-state", children: [jsx("h2", { children: "Could not load runs" }), jsx("p", { children: error })] }),
       runs && runs.length === 0 && jsx("div", { className: "empty-state", children: jsx("h2", { children: "No runs yet" }) }),
       runs && runs.length > 0 && jsx(RunPicker, { runs, selected,

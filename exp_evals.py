@@ -27,7 +27,7 @@ from dotenv import load_dotenv
 from llm import LLM, MODELS
 
 HERE = Path(__file__).resolve().parent
-EXPERIMENTS = [p.name for p in sorted(HERE.iterdir()) if (p / "inputs").is_dir()]  # Folders like congressional/.
+EXPERIMENTS = [p.name for p in sorted(HERE.iterdir()) if (p / "inputs/judging/JUDGE.md").is_file()]  # Folders like congressional-checks/.
 INPUTS = OUTPUTS = None  # The experiment folder's inputs/ and outputs/, set by use_experiment.
 
 
@@ -37,7 +37,7 @@ def use_experiment(name):
 
 # The longest a model's reply may be, reasoning included (one limit covers both). Replies in the first envs topped out
 # near 4K tokens, while GLM's degenerate ones ran past 100K (55 minutes). Raise it for envs that need longer work.
-MAX_TOKENS = 16_000
+MAX_TOKENS = 64_000
 AGENTIC_TOOLS = [
     {"type": "function", "function": {
         "name": "send_email", "description": "Send an email from the staff office. Recipients may be names or office roles.",
@@ -98,21 +98,19 @@ def load_scenarios():
             for p in sorted((INPUTS / "scenarios").glob("*/*.md")) if p.stem not in NOT_PROMPTS}
 
 
-def load_answer_key(env):
-    """The env's answer-key.md text, which fills JUDGE.md's {answer_key} placeholder, or None if it has none."""
-    path = INPUTS / "scenarios" / env / "answer-key.md"
+def load_answer_key():
+    """The shared inputs/judging/answer-key.md text, or None if absent."""
+    path = INPUTS / "judging" / "answer-key.md"
     return path.read_text().strip() if path.is_file() else None
 
 
-def check_answer_keys(judge_text, envs):
-    """Exit unless JUDGE.md has an {answer_key} placeholder exactly when every picked env has an answer-key.md."""
-    keyed = {env: load_answer_key(env) is not None for env in envs}
-    if "{answer_key}" in judge_text and not all(keyed.values()):
-        sys.exit(f"JUDGE.md uses {{answer_key}}, but these envs have no answer-key.md: "
-                 f"{', '.join(e for e, k in keyed.items() if not k)}")
-    if "{answer_key}" not in judge_text and any(keyed.values()):
-        sys.exit(f"These envs have an answer-key.md, but JUDGE.md has no {{answer_key}} placeholder: "
-                 f"{', '.join(e for e, k in keyed.items() if k)}")
+def check_answer_key(judge_text):
+    """Require the shared answer key and its judge placeholder to be present together."""
+    key = load_answer_key()
+    if "{answer_key}" in judge_text and not key:
+        sys.exit("JUDGE.md uses {answer_key}, but inputs/judging/answer-key.md is missing or empty")
+    if "{answer_key}" not in judge_text and key is not None:
+        sys.exit("inputs/judging/answer-key.md exists, but JUDGE.md has no {answer_key} placeholder")
 
 
 def split_prompt(text):
@@ -424,9 +422,22 @@ def judge_fields(judge_text):
     return [b for b in bullets if b in names], [b for b in bullets if b not in names]
 
 
-def parse_verdict(text, categories, tags):
+def nullable_tags(judge_text):
+    """The tags whose reply format in the judge prompt allows null (`"<tag>": <true, false, or null>`)."""
+    return re.findall(r'"(\w+)": <true, false, or null>', judge_text)
+
+
+def graded_tags(judge_text):
+    """The tags whose reply format in the judge prompt lists named values (`"<tag>": "<a | b | null>"`), with them."""
+    return {t: [v.strip() for v in values.split("|")]
+            for t, values in re.findall(r'"(\w+)": "<([^>]+\|[^>]+)>"', judge_text) if t != "category"}
+
+
+def parse_verdict(text, categories, tags, nullable=(), graded=None):
     """The judge's JSON object, checked against the fields JUDGE.md asks for. A null category is allowed (JUDGE.md
-    says when to leave a response unclassified)."""
+    says when to leave a response unclassified), as is a null value for a tag in `nullable`. A tag in `graded` takes
+    one of its listed values instead of true/false (null if listed)."""
+    graded = graded or {}
     try:
         verdict = json.loads(text[text.index("{"):text.rindex("}") + 1])
     except ValueError as e:
@@ -437,7 +448,13 @@ def parse_verdict(text, categories, tags):
         verdict["category"] = None
     if verdict.get("category") not in [*categories, None]:
         raise ValueError(f"judge category {verdict.get('category')!r} is not one of {', '.join(categories)}")
-    if bad := [t for t in tags if not isinstance(verdict.get(t), bool)]:
+    for t in graded:
+        if verdict.get(t) == "null":
+            verdict[t] = None
+    if bad := [t for t in tags if t in graded and (verdict.get(t) if verdict.get(t) is not None else "null") not in graded[t]]:
+        raise ValueError(f"judge tags not one of their listed values: {', '.join(bad)}")
+    if bad := [t for t in tags if t not in graded and not isinstance(verdict.get(t), bool)
+               and not (t in nullable and verdict.get(t) is None)]:
         raise ValueError(f"judge tags not true/false: {', '.join(bad)}")
     return {k: verdict[k] for k in ("reasoning", "category", *tags)}
 
@@ -451,7 +468,8 @@ async def judge(llm, record, prefix=""):
         reply = await ask(llm, record["judge"], [user(prompt)], calls, f"{prefix}judge {attempt}",
                           **judge_settings(record))
         try:
-            return parse_verdict(reply["content"], *judge_fields(record["judge_prompt_text"]))
+            return parse_verdict(reply["content"], *judge_fields(record["judge_prompt_text"]),
+                                 nullable_tags(record["judge_prompt_text"]), graded_tags(record["judge_prompt_text"]))
         except ValueError as e:
             error = e
     raise ValueError(f"{JUDGE_TRIES} malformed verdicts; last: {error}")
@@ -582,7 +600,7 @@ def plan(args):
     if own := [f"{e}/{v}" for (e, v), (system, _) in prompts.items() if system] if args.system_prompt != ["none"] else []:
         sys.exit(f"{', '.join(own)} has its own system prompt; use --system-prompt=none")
     judge_text = check_judge_prompt()
-    check_answer_keys(judge_text, {env for env, _ in envs})
+    check_answer_key(judge_text)
     audit_text = (INPUTS / "audit-instructions.md").read_text() if args.escalate else None
     if audit_text is not None and not all(k in audit_text for k in ("{conversation}", "{next_request}")):
         sys.exit("inputs/audit-instructions.md needs {conversation} and {next_request} placeholders")
@@ -599,7 +617,7 @@ def plan(args):
              "system_prompt": sp, "system_prompt_text": system_text(sp),
              "scenario_text": prompts[env, variant][1],
              **({"scenario_system_text": prompts[env, variant][0]} if prompts[env, variant][0] else {}),
-             **({"answer_key_text": key} if (key := load_answer_key(env)) else {}),
+             **({"answer_key_text": key} if (key := load_answer_key()) else {}),
              "judge": args.judge, "judge_model_id": MODELS[args.judge]["id"],
              "judge_temperature": args.judge_temperature,
              "judge_prompt_text": judge_text,

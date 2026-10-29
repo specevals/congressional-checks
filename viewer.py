@@ -9,7 +9,9 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlparse
 
 HERE = Path(__file__).resolve().parent
-EXPERIMENTS = [p.name for p in sorted(HERE.iterdir()) if (p / "inputs").is_dir()]  # As in exp_evals.py.
+EXPERIMENTS = [p.name for p in sorted(HERE.iterdir()) if (p / "inputs/judging/JUDGE.md").is_file()]  # As in exp_evals.py.
+PORTS = {"congressional-checks": 8768, "abliterated": 8769}  # Default ports, so both viewers can run at once.
+EXPERIMENT = None  # Set from the command line; it's the page's title.
 RUNS = None  # The experiment's outputs/, set from the command line.
 SUFFIX = "-results.jsonl"
 LABELS = "labels.json"  # In RUNS. Descriptors written by hand, by run: {"<run>": "escalation"}.
@@ -169,18 +171,23 @@ JUDGE_ERROR = "error"  # The judge's fallback category for a reply that isn't on
 def definitions(text):
     """Categories (in the judge prompt's order) and tags, read from the judge prompt a run saved. A category is a
     bullet named in the reply format's "category" list; every other bullet is a tag. The judge's "error" category is
-    kept apart (`error`, its definition, or None): it's shown as an error, not on the category scale."""
+    kept apart (`error`, its definition, or None): it's shown as an error, not on the category scale. A graded tag
+    takes one of its listed values instead of true/false."""
     bullets = re.findall(r"^- `(\w+)`: (.+)$", text, re.M)
     listed = re.search(r'"category": "<([^>]+)>"', text)
     names = [c.strip() for c in listed.group(1).split("|")] if listed else []
     return {"categories": [[k, v] for k, v in bullets if k in names and k != JUDGE_ERROR],
             "error": next((v for k, v in bullets if k == JUDGE_ERROR and k in names), None),
-            "tags": [[k, v] for k, v in bullets if k not in names]}
+            "tags": [[k, v] for k, v in bullets if k not in names],
+            # Tags the reply format gives named values (`"<tag>": "<strong | weak | fail | null>"`), best first, as in
+            # exp_evals.graded_tags; null (no answer) isn't one of them.
+            "graded": {t: [v.strip() for v in values.split("|") if v.strip() != "null"]
+                       for t, values in re.findall(r'"(\w+)": "<([^>]+\|[^>]+)>"', text) if t != "category"}}
 
 
 def any_turn_tags(judgments):
-    """For an escalating conversation, each true/false judge tag: whether it was true on any turn."""
-    names = [k for k, v in (judgments[0] if judgments else {}).items() if isinstance(v, bool)]
+    """For an escalating conversation, each judge tag: whether it was true on any turn."""
+    names = [k for k in (judgments[0] if judgments else {}) if k not in ("reasoning", "category")]
     return {k: any(j.get(k) for j in judgments) for k in names} or None
 
 
@@ -193,7 +200,7 @@ def outcome(record):
         row |= {"complied": record.get("complied", 0), "stop": record.get("stop"),
                 "steps": [s["title"] for s in record["escalations"]],
                 "tags_any": any_turn_tags(record.get("judgments") or [])}
-    row["tags"] = {k: v for k, v in judgment.items() if isinstance(v, bool)} or None
+    row["tags"] = {k: v for k, v in judgment.items() if k not in ("reasoning", "category")} or None  # A tag may be null.
     row["judged_error"] = any((j or {}).get("category") == JUDGE_ERROR
                               for j in record.get("judgments") or [record.get("judgment")])
     row["error"] = record.get("error")
@@ -211,9 +218,11 @@ class Handler(SimpleHTTPRequestHandler):
         query = {k: v[0] for k, v in parse_qs(url.query).items()}
         wanted = [r for r in query.get("runs", "").split(",") if r]
         try:
+            if url.path == "/":
+                page = (HERE / PAGES[url.path]).read_text().replace("<title>EPC</title>", f"<title>{EXPERIMENT}</title>")
+                return self.send(200, page.encode(), "text/html")
             if url.path in PAGES:
-                return self.send(200, (HERE / PAGES[url.path]).read_bytes(),
-                                 "text/html" if url.path == "/" else "text/javascript")
+                return self.send(200, (HERE / PAGES[url.path]).read_bytes(), "text/javascript")
             if url.path == "/api/runs":
                 return self.json([run_info(r, labels().get(r)) for r in runs()])
             first = query.get("first") == "1"
@@ -242,8 +251,10 @@ class Handler(SimpleHTTPRequestHandler):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("experiment", choices=EXPERIMENTS)
-    parser.add_argument("--port", type=int, default=8768)
+    parser.add_argument("--port", type=int)
     args = parser.parse_args()
+    args.port = args.port or PORTS.get(args.experiment, 8770)
+    EXPERIMENT = args.experiment
     RUNS = HERE / args.experiment / "outputs"
     print(f"Run viewer: http://localhost:{args.port}", flush=True)
     server = ThreadingHTTPServer(("localhost", args.port), Handler)

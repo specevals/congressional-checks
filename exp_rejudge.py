@@ -1,4 +1,4 @@
-"""Judge an earlier run's conversations again with the experiment's current inputs/judging/JUDGE.md (and answer keys), saving a full copy of that run
+"""Judge an earlier run's conversations again with the experiment's current inputs/judging/JUDGE.md (and the shared answer key), saving a full copy of that run
 with the new judgments as a new run. Costs money (judge calls only; no model is asked anything).
 
 A copied record keeps its conversation and model calls, gets fresh judge settings, judge calls and judgment, and
@@ -36,7 +36,7 @@ def copy(record, args, judge_text, source):
     provider-blocked one gets the classifier_refusal category (except an agentic one cut off in the middle, which is
     judged)."""
     drop = ("judgment", "cost", "unreported_costs", "answer_key_text") + (("error",) if judgeable(record) else ())
-    key = exp_evals.load_answer_key(record["env"])
+    key = exp_evals.load_answer_key()
     record = {k: v for k, v in record.items() if k not in drop} | ({"answer_key_text": key} if key else {})
     return record | {"judge": args.judge, "judge_model_id": MODELS[args.judge]["id"],
                      "judge_temperature": args.judge_temperature,
@@ -85,7 +85,7 @@ def plan(args):
     old = [json.loads(line) for line in path.read_text().splitlines() if line.strip()]
     if any("escalations" in r for r in old):
         sys.exit("Re-judging escalating runs isn't supported: each turn's verdict decided whether the conversation went on")
-    exp_evals.check_answer_keys(judge_text, {r["env"] for r in old})
+    exp_evals.check_answer_key(judge_text)
     source = old[0].get("rejudged_from") or args.run  # The run the conversations came from.
     return [copy(r, args, judge_text, source) for r in old]
 
