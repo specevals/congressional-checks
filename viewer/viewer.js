@@ -768,12 +768,12 @@ function SortToggle({ state, setState, stateKey, first = "By rate" }) {
 const LABEL_W = 190;
 // Each model's conversations by category, in the judge prompt's order, left to right, then unclassified (no category:
 // degenerate output, or an error); shares are of all conversations.
-function CategoryDistributionFigure({ rows, controls }) {
+function CategoryDistributionFigure({ rows, controls, title = "Category distribution" }) {
   const share = (row, c) => (row.own.length ? row.own.filter((r) =>
     c === "unclassified" ? !isJudged(r) : isJudged(r) && r.category === c).length / row.own.length : 0);
   const unclassified = rows.some((row) => share(row, "unclassified") > 0);
   const plotW = FIG_WIDTH - LABEL_W - 20, rowH = 28, top = 6, gap = 2, height = top + rows.length * rowH + 22;
-  return jsx(Figure, { title: "Category distribution", controls, extra: jsx(ScoreLegend, { unclassified }), children: jsx(Svg, {
+  return jsx(Figure, { title, controls, extra: jsx(ScoreLegend, { unclassified }), children: jsx(Svg, {
     width: FIG_WIDTH, height, children: [
       [0, 0.25, 0.5, 0.75, 1].map((t) => jsxs("g", { children: [
         jsx("line", { x1: LABEL_W + t * plotW, x2: LABEL_W + t * plotW, y1: top, y2: top + rows.length * rowH, stroke: GRID }),
@@ -917,7 +917,7 @@ function wilson(k, n, z = 1.96) {
 // One upright bar per model, with its 95% Wilson interval: the share of its conversations given a category that got a compliance category (every
 // category not in REFUSAL_CATEGORIES), i.e. 1 - refusalRate. With several variants, each model gets one bar per
 // variant, in the variant's color, and its counts go under each bar.
-function ComplianceFigure({ rows, variants, controls }) {
+function ComplianceFigure({ rows, variants, controls, title = "Compliance rate" }) {
   const grouped = variants.length > 1;
   const top = 30, plotH = 220, left = 40;
   const slot = (FIG_WIDTH - left) / Math.max(1, rows.length);
@@ -934,7 +934,7 @@ function ComplianceFigure({ rows, variants, controls }) {
   const height = top + plotH + labelH;
   const legend = grouped && jsx("div", { className: "figure-legend", children: variants.map((v) => jsxs("span", {
     children: [jsx("span", { className: "figure-swatch", style: { background: variantColor(variants, v) } }), v] }, v)) });
-  return jsx(Figure, { title: "Compliance rate", controls, extra: legend, children: jsx(Svg, { width: FIG_WIDTH, height, children: [
+  return jsx(Figure, { title, controls, extra: legend, children: jsx(Svg, { width: FIG_WIDTH, height, children: [
     [0, 0.25, 0.5, 0.75, 1].map((t) => jsxs("g", { children: [
       jsx("line", { x1: left, x2: FIG_WIDTH, y1: top + plotH * (1 - t), y2: top + plotH * (1 - t), stroke: GRID }),
       jsx(Text, { x: left - 8, y: top + plotH * (1 - t), size: 11, fill: INK3, anchor: "end", children: pct(t) }),
@@ -1167,7 +1167,7 @@ function EscalationCharts({ index, series }) {
   }) });
 }
 
-function Figures({ index, series, onOpen, state, setState }) {
+function Figures({ index, series, onOpen, state, setState, title, runVariants }) {
   // In model order (see MODELS).
   const byModel = series.map((s) => {
     const own = index.filter((r) => seriesKey(r) === s.key);
@@ -1175,14 +1175,25 @@ function Figures({ index, series, onOpen, state, setState }) {
   });
   const byCategory = [...byModel].sort((a, b) => refusalRate(b.own) - refusalRate(a.own));
   const sorted = (key) => (state[key] === "model" ? byModel : byCategory);
-  // With several variants, each model's row becomes one row per variant it ran, labeled "<model> · <variant>".
-  const variants = variantsOf(index);
+  // With several variants, each model's row becomes one row per variant it ran, labeled "<model> · <variant>". One
+  // env's figures take the whole run's variants, so each variant keeps its color (one the env didn't run shows "--").
+  const variants = runVariants || variantsOf(index);
   const byVariant = (rows) => (variants.length < 2 ? rows : rows.flatMap((row) => variants.map((v) => {
     const own = row.own.filter((r) => variantOf(r) === v);
     return { series: { ...row.series, key: `${row.series.key}|${v}`, label: `${row.series.label} · ${v}` }, own,
       judged: own.filter(isJudged) };
   }).filter((row) => row.own.length)));
   const sortControl = (key) => jsx(SortToggle, { state, setState, stateKey: key }, key);
+  // With several variants and several envs, each env gets its own set of figures, titled "<figure>: <env>", and the
+  // scenario grid comes after them all.
+  const envs = [...new Set(index.map((r) => r.env))].sort(byEnvOrder);
+  if (!index.some(isEscalating) && variantsOf(index).length > 1 && envs.length > 1)
+    return jsxs("div", { children: [
+      ...envs.map((env) => jsx(Figures, { index: index.filter((r) => r.env === env), onOpen, state, setState,
+        series: series.filter((s) => index.some((r) => r.env === env && seriesKey(r) === s.key)), title: `: ${envName(env)}`,
+        runVariants: variants }, env)),
+      jsx(ScenarioMatrixFigure, { rows: sorted("grid_sort"), index, onOpen, controls: sortControl("grid_sort") }),
+    ] });
   if (index.some(isEscalating))
     return jsxs("div", { children: [
       jsx(TurnsCompliedFigure, { title: "Turns complied, all scenarios", rows: index.filter((r) => r.steps), series,
@@ -1200,12 +1211,14 @@ function Figures({ index, series, onOpen, state, setState }) {
       ] }),
     ] });
   return jsxs("div", { children: [
-    jsx(ComplianceFigure, { rows: sorted("comply_sort"), variants, controls: sortControl("comply_sort") }),
-    jsx(CategoryDistributionFigure, { rows: byVariant(sorted("dist_sort")), controls: sortControl("dist_sort") }),
-    jsx(ScenarioMatrixFigure, { rows: sorted("grid_sort"), index, onOpen, controls: sortControl("grid_sort") }),
+    jsx(ComplianceFigure, { rows: sorted("comply_sort"), variants, controls: sortControl("comply_sort"),
+      title: `Compliance rate${title || ""}` }),
+    jsx(CategoryDistributionFigure, { rows: byVariant(sorted("dist_sort")), controls: sortControl("dist_sort"),
+      title: `Category distribution${title || ""}` }),
+    !title && jsx(ScenarioMatrixFigure, { rows: sorted("grid_sort"), index, onOpen, controls: sortControl("grid_sort") }),
     ...Object.keys(GRADED).map((t) => jsx(GradedDistributionFigure, { tag: t, rows: byVariant(byModel) }, t)),
     jsx("div", { className: "figure-pair", children: [
-      ...BOOLEAN_TAGS().map((t) => jsx(CountFigure, { title: words(t), rows: byVariant(byModel),
+      ...BOOLEAN_TAGS().map((t) => jsx(CountFigure, { title: `${words(t)}${title || ""}`, rows: byVariant(byModel),
         count: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t]).length,
         total: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t] != null).length }, t)),
     ] }),
