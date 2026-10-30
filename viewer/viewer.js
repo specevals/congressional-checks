@@ -104,6 +104,12 @@ const ENVS = {
 };
 // A scenario is an env's main prompt ("<env>") or another variant of it ("<env>/<variant>", from
 // inputs/scenarios/<env>/<variant>.md), shown after the env's name and listed right after its main.
+const variantOf = (record) => record.variant || "main";
+// The variants in these records: main first, then the others in the order they first appear.
+const variantsOf = (records) => {
+  const all = [...new Set(records.map(variantOf))];
+  return all.includes("main") ? ["main", ...all.filter((v) => v !== "main")] : all;
+};
 const scenarioOf = (record) => (!record.variant || record.variant === "main" ? record.env : `${record.env}/${record.variant}`);
 const envName = (id) => {
   const [env, variant] = id.split("/");
@@ -909,38 +915,54 @@ function wilson(k, n, z = 1.96) {
   return [Math.max(0, mid - half), Math.min(1, mid + half)];
 }
 // One upright bar per model, with its 95% Wilson interval: the share of its conversations given a category that got a compliance category (every
-// category not in REFUSAL_CATEGORIES), i.e. 1 - refusalRate.
-function ComplianceFigure({ rows, controls }) {
+// category not in REFUSAL_CATEGORIES), i.e. 1 - refusalRate. With several variants, each model gets one bar per
+// variant, in the variant's color, and its counts go under each bar.
+function ComplianceFigure({ rows, variants, controls }) {
+  const grouped = variants.length > 1;
   const top = 30, plotH = 220, left = 40;
-  const slot = (FIG_WIDTH - left) / Math.max(1, rows.length), barW = Math.min(56, slot * 0.6);
+  const slot = (FIG_WIDTH - left) / Math.max(1, rows.length);
+  const barW = grouped ? Math.min(44, (slot * 0.8) / variants.length) : Math.min(56, slot * 0.6);
   // With many models, names are tilted and carry their counts, so neighbors don't overlap.
-  const tilted = slot < 110;
-  const name = (row) => (tilted ? `${row.series.label} ${row.k}/${row.n}` : row.series.label);
+  const tilted = slot < 110 * (grouped ? variants.length : 1);
+  rows = rows.map((row) => ({ ...row, bars: (grouped ? variants : [null]).map((v) => {
+    const judged = v == null ? row.judged : row.judged.filter((r) => variantOf(r) === v);
+    return { v, n: judged.length, k: judged.filter((r) => !REFUSAL_CATEGORIES.includes(r.category)).length };
+  }) }));
+  const counts = (row) => row.bars.map((b) => `${b.k}/${b.n}`).join(" · ");
+  const name = (row) => (tilted ? `${row.series.label} ${counts(row)}` : row.series.label);
   const labelH = tilted ? 16 + Math.max(0, ...rows.map((row) => name(row).length)) * 6.4 * 0.71 : 40;
   const height = top + plotH + labelH;
-  rows = rows.map((row) => ({ ...row, n: row.judged.length,
-    k: row.judged.filter((r) => !REFUSAL_CATEGORIES.includes(r.category)).length }));
-  return jsx(Figure, { title: "Compliance rate", controls, children: jsx(Svg, { width: FIG_WIDTH, height, children: [
+  const legend = grouped && jsx("div", { className: "figure-legend", children: variants.map((v) => jsxs("span", {
+    children: [jsx("span", { className: "figure-swatch", style: { background: variantColor(variants, v) } }), v] }, v)) });
+  return jsx(Figure, { title: "Compliance rate", controls, extra: legend, children: jsx(Svg, { width: FIG_WIDTH, height, children: [
     [0, 0.25, 0.5, 0.75, 1].map((t) => jsxs("g", { children: [
       jsx("line", { x1: left, x2: FIG_WIDTH, y1: top + plotH * (1 - t), y2: top + plotH * (1 - t), stroke: GRID }),
       jsx(Text, { x: left - 8, y: top + plotH * (1 - t), size: 11, fill: INK3, anchor: "end", children: pct(t) }),
     ] }, t)),
     rows.map((row, i) => {
-      const { n, k } = row, h = n ? (k / n) * plotH : 0, cx = left + slot * (i + 0.5);
-      const [lo, hi] = wilson(k, n).map((v) => top + plotH * (1 - v));
+      const cx = left + slot * (i + 0.5);
       return jsxs("g", { children: [
-        jsx("rect", { x: cx - barW / 2, y: top + plotH - h, width: barW, height: h, rx: 3, fill: BAR }),
-        n > 0 && jsx("path", { d: `M${cx - 6},${hi}H${cx + 6}M${cx},${hi}V${lo}M${cx - 6},${lo}H${cx + 6}`,
-          stroke: INK, strokeWidth: 1.5, fill: "none" }),
-        jsx(Text, { x: cx, y: Math.min(hi, top + plotH - h) - 12, fill: INK, anchor: "middle", weight: 600,
-          size: tilted ? 10 : 12, children: n ? (tilted ? `${Math.round((100 * k) / n)}%` : pct(k / n)) : "--" }),
+        row.bars.map(({ v, n, k }, j) => {
+          const h = n ? (k / n) * plotH : 0, bx = cx + (j - (row.bars.length - 1) / 2) * (barW + 6);
+          const [lo, hi] = wilson(k, n).map((p) => top + plotH * (1 - p));
+          return jsxs("g", { children: [
+            jsx("rect", { x: bx - barW / 2, y: top + plotH - h, width: barW, height: h, rx: 3,
+              fill: grouped ? variantColor(variants, v) : BAR }),
+            n > 0 && jsx("path", { d: `M${bx - 6},${hi}H${bx + 6}M${bx},${hi}V${lo}M${bx - 6},${lo}H${bx + 6}`,
+              stroke: INK, strokeWidth: 1.5, fill: "none" }),
+            jsx(Text, { x: bx, y: Math.min(hi, top + plotH - h) - 12, fill: INK, anchor: "middle", weight: 600,
+              size: tilted || grouped ? 10 : 12, children: n ? (tilted || grouped ? `${Math.round((100 * k) / n)}%` : pct(k / n)) : "--" }),
+            grouped && !tilted && jsx(Text, { x: bx, y: top + plotH + 30, size: 11, fill: INK3, anchor: "middle",
+              children: `${k}/${n}` }),
+          ] }, v ?? "all");
+        }),
         tilted
           ? jsx(Text, { x: cx, y: top + plotH + 10, fill: INK, anchor: "end", size: 11,
               transform: `rotate(-45 ${cx} ${top + plotH + 10})`, children: [row.series.label,
-                jsx("tspan", { fill: INK3, children: ` ${k}/${n}` })] })
+                jsx("tspan", { fill: INK3, children: ` ${counts(row)}` })] })
           : jsxs(Fragment, { children: [
               jsx(Text, { x: cx, y: top + plotH + 14, fill: INK, anchor: "middle", children: row.series.label }),
-              jsx(Text, { x: cx, y: top + plotH + 30, size: 11, fill: INK3, anchor: "middle", children: `${k}/${n}` })] }),
+              !grouped && jsx(Text, { x: cx, y: top + plotH + 30, size: 11, fill: INK3, anchor: "middle", children: counts(row) })] }),
       ] }, row.series.key);
     }),
   ] }) });
@@ -1153,6 +1175,13 @@ function Figures({ index, series, onOpen, state, setState }) {
   });
   const byCategory = [...byModel].sort((a, b) => refusalRate(b.own) - refusalRate(a.own));
   const sorted = (key) => (state[key] === "model" ? byModel : byCategory);
+  // With several variants, each model's row becomes one row per variant it ran, labeled "<model> · <variant>".
+  const variants = variantsOf(index);
+  const byVariant = (rows) => (variants.length < 2 ? rows : rows.flatMap((row) => variants.map((v) => {
+    const own = row.own.filter((r) => variantOf(r) === v);
+    return { series: { ...row.series, key: `${row.series.key}|${v}`, label: `${row.series.label} · ${v}` }, own,
+      judged: own.filter(isJudged) };
+  }).filter((row) => row.own.length)));
   const sortControl = (key) => jsx(SortToggle, { state, setState, stateKey: key }, key);
   if (index.some(isEscalating))
     return jsxs("div", { children: [
@@ -1171,12 +1200,12 @@ function Figures({ index, series, onOpen, state, setState }) {
       ] }),
     ] });
   return jsxs("div", { children: [
-    jsx(ComplianceFigure, { rows: sorted("comply_sort"), controls: sortControl("comply_sort") }),
-    jsx(CategoryDistributionFigure, { rows: sorted("dist_sort"), controls: sortControl("dist_sort") }),
+    jsx(ComplianceFigure, { rows: sorted("comply_sort"), variants, controls: sortControl("comply_sort") }),
+    jsx(CategoryDistributionFigure, { rows: byVariant(sorted("dist_sort")), controls: sortControl("dist_sort") }),
     jsx(ScenarioMatrixFigure, { rows: sorted("grid_sort"), index, onOpen, controls: sortControl("grid_sort") }),
-    ...Object.keys(GRADED).map((t) => jsx(GradedDistributionFigure, { tag: t, rows: byModel }, t)),
+    ...Object.keys(GRADED).map((t) => jsx(GradedDistributionFigure, { tag: t, rows: byVariant(byModel) }, t)),
     jsx("div", { className: "figure-pair", children: [
-      ...BOOLEAN_TAGS().map((t) => jsx(CountFigure, { title: words(t), rows: byModel,
+      ...BOOLEAN_TAGS().map((t) => jsx(CountFigure, { title: words(t), rows: byVariant(byModel),
         count: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t]).length,
         total: (row) => row.own.filter(hasJudgment).filter((r) => (r.tags || {})[t] != null).length }, t)),
     ] }),
@@ -1186,6 +1215,7 @@ function Figures({ index, series, onOpen, state, setState }) {
 // System prompt comparison, within one run that ran several system prompts: compliance rate (1 - refusalRate) under
 // each. Pooled and by-scenario numbers use only the models that ran under every one.
 const SP_COLORS = ["#8899a6", "#8250df", "#0e7490", "#bf5a10", "#d63384"];
+const variantColor = (variants, v) => SP_COLORS[variants.indexOf(v) % SP_COLORS.length];
 const complianceOf = (records) => {
   const judged = records.filter(isJudged);
   const k = judged.filter((r) => !REFUSAL_CATEGORIES.includes(r.category)).length;
@@ -1269,7 +1299,7 @@ function Settings({ run, prompts, sp, onSp, first, onFirst }) {
     ["System prompt", sp ? choice(prompts, sp, onSp) : prompts.join(", ")], ["Samples", String(run.config.n)],
     ...(run.settings.auditors ? [["Auditor", run.settings.auditors.map(([a]) => modelName(a)).join(", ")]] : []),
     ...(run.escalating ? [["Turns", choice(["all", "first"], first ? "first" : "all", (v) => onFirst(v === "first"))]] : []),
-    ...(run.agentic ? [["Mode", "Agentic"], ["Turn limit", (run.settings.agentic_turn_limits || []).map(([n]) => n).join(", ")]] : [])];
+    ...(run.agentic ? [["Mode", run.agentic_variants ? `Agentic (${run.agentic_variants.join(", ")})` : "Agentic"], ["Turn limit", (run.settings.agentic_turn_limits || []).map(([n]) => n).join(", ")]] : [])];
   return jsxs("div", { className: "panel-section", children: [
     jsx("span", { className: "defs-heading", children: "Settings" }),
     jsx("div", { className: "settings-grid", children: rows.flatMap(([name, value]) => [

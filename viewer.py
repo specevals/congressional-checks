@@ -131,7 +131,7 @@ def settings(rows):
     def grouped(field):
         groups = {}
         for row in rows:
-            models = groups.setdefault(row[field], [])
+            models = groups.setdefault(row.get(field), [])
             if row["model"] not in models:
                 models.append(row["model"])
         return [[value, models] for value, models in groups.items()]
@@ -140,9 +140,9 @@ def settings(rows):
     out = {"judges": grouped("judge"), "judge_temperatures": grouped("judge_temperature"),
            "system_prompts": grouped("system_prompt")}
     if any("escalations" in row or row.get("agentic") for row in rows):
-        out["auditors"] = grouped("auditor")
+        out["auditors"] = [g for g in grouped("auditor") if g[0] is not None]  # A run may mix agentic conversations with others.
     if any(row.get("agentic") for row in rows):
-        out["agentic_turn_limits"] = grouped("max_agentic_turns")
+        out["agentic_turn_limits"] = [g for g in grouped("max_agentic_turns") if g[0] is not None]
     return out
 
 
@@ -161,6 +161,9 @@ def run_info(run, label=None):
             "records": len(rows), "summary": None if running else {"cost": sum(r["calls_cost"] for r in rows)},
             "settings": settings(rows), "escalating": any("escalations" in r for r in rows),
             "agentic": any(r.get("agentic") for r in rows),
+            # With agentic conversations and others in one run, the variants that ran agentic.
+            "agentic_variants": sorted({r.get("variant") or "main" for r in rows if r.get("agentic")})
+            if not all(r.get("agentic") for r in rows) else None,
             "system_prompt_texts": {r["system_prompt"]: r.get("system_prompt_text") for r in rows}, "rejudged_from": next((r.get("rejudged_from") for r in rows), None),
             "definitions": definitions(next((r["judge_prompt_text"] for r in rows if r.get("judge_prompt_text")), ""))}
 

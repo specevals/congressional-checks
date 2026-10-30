@@ -629,22 +629,29 @@ def plan(args):
             for sp in args.system_prompt for model in args.models for env, variant in envs for sample in range(args.n)]
 
 
-SHARED = ("judge", "judge_temperature", "judge_prompt_text", "auditor", "audit_prompt_text", "agentic", "max_agentic_turns")
+SHARED = ("judge", "judge_temperature")  # The same for every conversation in a run.
+# The same for every conversation in a run of the same mode: a run may hold agentic conversations and others.
+MODE_SHARED = ("judge_prompt_text", "auditor", "audit_prompt_text", "max_agentic_turns", "tools")
 conversation_key = lambda r: (r["model"], r["system_prompt"], r["env"], r.get("variant") or "main", r["sample"])
 
 
 def check_addition(run, existing, records):
-    """Exit unless the planned records can join an existing run: the same judge, judge prompt and auditor setup as it,
-    the same text for every scenario, escalation steps and system prompt they share, and no conversation it already has."""
+    """Exit unless the planned records can join an existing run: the same judge as it, the same judge prompt and auditor
+    setup as its conversations of the same mode (agentic or not), the same text for every scenario, escalation steps and
+    system prompt they share, and no conversation it already has."""
     def differs(what):
         sys.exit(f"Can't add to {run}: {what} differs from the run's")
     if {"escalations" in r for r in records} != {"escalations" in r for r in existing}:
         differs("escalating or not")
+    value = lambda r, field: json.dumps(r.get(field), sort_keys=True)
     for field in SHARED:
-        if {r.get(field) for r in records} != {r.get(field) for r in existing}:
+        if {value(r, field) for r in records} != {value(r, field) for r in existing}:
             differs(field)
-    if {json.dumps(r.get("tools"), sort_keys=True) for r in records} != {json.dumps(r.get("tools"), sort_keys=True) for r in existing}:
-        differs("tools")
+    for agentic in (False, True):
+        mine, theirs = ([r for r in rs if bool(r.get("agentic")) == agentic] for rs in (records, existing))
+        for field in MODE_SHARED:
+            if mine and theirs and {value(r, field) for r in mine} != {value(r, field) for r in theirs}:
+                differs(field)
     for field, key in [("scenario_text", lambda r: (r["env"], r.get("variant") or "main")),
                        ("scenario_system_text", lambda r: (r["env"], r.get("variant") or "main")),
                        ("answer_key_text", lambda r: r["env"]),

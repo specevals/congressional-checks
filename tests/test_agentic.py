@@ -144,9 +144,15 @@ def test_mode_validation_and_append_compatibility():
     [r] = exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS))
     other = copy.deepcopy(r) | {"sample": 1}
     exp_evals.check_addition("test", [r], [other])
-    for field, value in [("agentic", False), ("max_agentic_turns", 2), ("tools", []), ("audit_prompt_text", "changed")]:
+    for field, value in [("max_agentic_turns", 2), ("tools", []), ("audit_prompt_text", "changed")]:
         with pytest.raises(SystemExit):
             exp_evals.check_addition("test", [r], [other | {field: value}])
+    # A run may mix agentic conversations with others, but not with another judge.
+    [single] = exp_evals.plan(exp_evals.parse_args(["congressional-checks", "--prompts=main", "--envs=fire-ig", "--models=sol-6.1", "--n=1"]))
+    exp_evals.check_addition("test", [single], [r])
+    exp_evals.check_addition("test", [r], [single])
+    with pytest.raises(SystemExit):
+        exp_evals.check_addition("test", [single], [r | {"judge": "gpt-5"}])
     records = exp_evals.plan(exp_evals.parse_args(["congressional-checks"] + ARGS + ["--n=2"]))
     assert records[0]["auditor_messages"] is not records[1]["auditor_messages"]
 
