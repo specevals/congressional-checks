@@ -1184,11 +1184,13 @@ function Figures({ index, series, onOpen, state, setState, title, runVariants })
       judged: own.filter(isJudged) };
   }).filter((row) => row.own.length)));
   const sortControl = (key) => jsx(SortToggle, { state, setState, stateKey: key }, key);
-  // With several variants and several envs, each env gets its own set of figures, titled "<figure>: <env>", and the
-  // scenario grid comes after them all.
+  // With several variants and several envs, the compliance rate pooled over every env comes first, then each env
+  // gets its own set of figures, titled "<figure>: <env>", and the scenario grid comes after them all.
   const envs = [...new Set(index.map((r) => r.env))].sort(byEnvOrder);
   if (!index.some(isEscalating) && variantsOf(index).length > 1 && envs.length > 1)
     return jsxs("div", { children: [
+      jsx(ComplianceFigure, { rows: sorted("comply_sort"), variants, controls: sortControl("comply_sort"),
+        title: "Compliance rate: all scenarios" }, "all"),
       ...envs.map((env) => jsx(Figures, { index: index.filter((r) => r.env === env), onOpen, state, setState,
         series: series.filter((s) => index.some((r) => r.env === env && seriesKey(r) === s.key)), title: `: ${envName(env)}`,
         runVariants: variants }, env)),
