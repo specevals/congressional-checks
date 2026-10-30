@@ -444,11 +444,15 @@ def test_add_to_appends_to_a_matching_run(tmp_path, monkeypatch):
     _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"),
                         ["--prompts=main", "--models=sol-6.1", "--n=1", "--envs=fire-ig", f"--add-to={name}"])
     assert [r["model"] for r in records] == ["opus-5.5", "sol-6.1"] and {r["run"] for r in records} == {first[0]["run"]}
-    for argv in (["--prompts=main", "--models=sol-6.1"], ["--prompts=main", "--models=luna-6", "--judge=gpt-5"], ["--prompts=main", "--models=luna-6", "--escalate"]):
-        with pytest.raises(SystemExit):  # Already there; another judge; escalating.
+    for argv in (["--prompts=main", "--models=luna-6", "--judge=gpt-5"], ["--prompts=main", "--models=luna-6", "--escalate"]):
+        with pytest.raises(SystemExit):  # Another judge; escalating.
             asyncio.run(exp_evals.run(exp_evals.parse_args(["congressional-checks", *argv, "--n=1", "--envs=fire-ig", f"--add-to={name}"]),
                                       FakeLLM(judge_or("ok"))))
     assert len((tmp_path / first[0]["run"]).read_text().splitlines()) == 2
+    # More samples of a model already there are numbered after its own.
+    _, records, _ = run(tmp_path, monkeypatch, judge_or("ok"),
+                        ["--prompts=main", "--models=sol-6.1", "--n=2", "--envs=fire-ig", f"--add-to={name}"])
+    assert [(r["model"], r["sample"]) for r in records] == [("opus-5.5", 0), ("sol-6.1", 0), ("sol-6.1", 1), ("sol-6.1", 2)]
 
 
 def test_judge_error_is_flagged_and_ends_an_escalation(tmp_path, monkeypatch, capsys):

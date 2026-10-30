@@ -676,7 +676,15 @@ async def run(args, llm=None):
         out = OUTPUTS / f"{args.add_to.removesuffix('-results.jsonl')}-results.jsonl"
         if not out.is_file():
             sys.exit(f"No run {args.add_to} in {OUTPUTS}")
-        check_addition(out.name, [json.loads(line) for line in out.read_text().splitlines() if line.strip()], records)
+        existing = [json.loads(line) for line in out.read_text().splitlines() if line.strip()]
+        # New samples are numbered after the run's own, so --n adds that many more of each conversation.
+        last = {}
+        for r in existing:
+            key = conversation_key(r)[:-1]
+            last[key] = max(last.get(key, -1), r["sample"])
+        for r in records:
+            r["sample"] += last.get(conversation_key(r)[:-1], -1) + 1
+        check_addition(out.name, existing, records)
     load_dotenv()  # Finds mats/.env by searching up from here.
     async with (llm or LLM()) as llm:
         try:
